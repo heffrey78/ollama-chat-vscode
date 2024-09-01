@@ -3,7 +3,9 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import ollama from 'ollama';
 import * as os from 'os';
-import * as child_process from 'child_process';
+import * as child_process from 'child_process';    
+import { MessageHandler } from './messageHandler'; 
+
 
 export interface ToolHandler {
     execute(args: any, cwd: string, state: any): Promise<any>;
@@ -109,10 +111,28 @@ export class AttemptCompletionHandler implements ToolHandler {
     }
 }
 
+
 export class PlannerHandler implements ToolHandler {
+
     async execute(args: any, cwd: string, state: any): Promise<any> {
-        // Implement planning logic
-        return { plan: [`Step 1: ...`, `Step 2: ...`, `Step 3: ...`] };
+        const planningPrompt = `
+            Given the following user request, break it down into small, individually executable tasks.
+            Each task should be a single, atomic operation that can be performed independently.
+            Present the tasks as a numbered list.
+
+            User Request: ${args.message}
+
+            Tasks:
+        `;
+
+        const response = await MessageHandler.handleToolMessage(planningPrompt, false);
+        const tasks = this.parseTasks(response);
+        return tasks;
+    }
+
+    private parseTasks(response: string): string[] {
+        const taskLines = response.split('\n').filter(line => /^\d+\./.test(line.trim()));
+        return taskLines.map(line => line.replace(/^\d+\.\s*/, '').trim());
     }
 }
 

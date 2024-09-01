@@ -33,6 +33,7 @@ const fs = __importStar(require("fs/promises"));
 const ollama_1 = __importDefault(require("ollama"));
 const os = __importStar(require("os"));
 const child_process = __importStar(require("child_process"));
+const messageHandler_1 = require("./messageHandler");
 class ExecuteCommandHandler {
     async execute(args, cwd, state) {
         const operatingSystem = os.platform();
@@ -132,8 +133,22 @@ class AttemptCompletionHandler {
 exports.AttemptCompletionHandler = AttemptCompletionHandler;
 class PlannerHandler {
     async execute(args, cwd, state) {
-        // Implement planning logic
-        return { plan: [`Step 1: ...`, `Step 2: ...`, `Step 3: ...`] };
+        const planningPrompt = `
+            Given the following user request, break it down into small, individually executable tasks.
+            Each task should be a single, atomic operation that can be performed independently.
+            Present the tasks as a numbered list.
+
+            User Request: ${args.message}
+
+            Tasks:
+        `;
+        const response = await messageHandler_1.MessageHandler.handleToolMessage(planningPrompt, false);
+        const tasks = this.parseTasks(response);
+        return tasks;
+    }
+    parseTasks(response) {
+        const taskLines = response.split('\n').filter(line => /^\d+\./.test(line.trim()));
+        return taskLines.map(line => line.replace(/^\d+\.\s*/, '').trim());
     }
 }
 exports.PlannerHandler = PlannerHandler;

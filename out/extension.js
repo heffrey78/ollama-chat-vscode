@@ -30,177 +30,8 @@ exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
 const ollama_1 = require("ollama");
 const node_fetch_1 = __importDefault(require("node-fetch"));
-const os = __importStar(require("os"));
-const pipelineHandler_1 = require("./pipelineHandler");
+const messageHandler_1 = require("./messageHandler");
 const ollama = new ollama_1.Ollama({ fetch: node_fetch_1.default });
-function getWorkingDirectory() {
-    const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-    const configuredDir = config.get('workingDirectory');
-    return configuredDir || os.homedir();
-}
-const ollamaTools = [
-    {
-        type: 'function',
-        function: {
-            name: 'execute_command',
-            description: 'Execute a CLI command on the system.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    command: {
-                        type: 'string',
-                        description: 'The CLI command to execute.'
-                    }
-                },
-                required: ['command']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'list_files_top_level',
-            description: 'List all files and directories at the top level of the specified directory.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: {
-                        type: 'string',
-                        description: 'The path of the directory to list contents for.'
-                    }
-                },
-                required: ['path']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'list_files_recursive',
-            description: 'Recursively list all files and directories within the specified directory.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: {
-                        type: 'string',
-                        description: 'The path of the directory to recursively list contents for.'
-                    }
-                },
-                required: ['path']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'view_source_code_definitions_top_level',
-            description: 'Parse all source code files at the top level of the specified directory to extract names of key elements like classes and functions.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: {
-                        type: 'string',
-                        description: 'The path of the directory to parse top level source code files for to view their definitions.'
-                    }
-                },
-                required: ['path']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'read_file',
-            description: 'Read the contents of a file at the specified path.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: {
-                        type: 'string',
-                        description: 'The path of the file to read.'
-                    }
-                },
-                required: ['path']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'write_to_file',
-            description: 'Write content to a file at the specified path.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: {
-                        type: 'string',
-                        description: 'The path of the file to write to.'
-                    },
-                    content: {
-                        type: 'string',
-                        description: 'The content to write to the file.'
-                    }
-                },
-                required: ['path', 'content']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'ask_followup_question',
-            description: 'Ask the user a question to gather additional information.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    question: {
-                        type: 'string',
-                        description: 'The question to ask the user.'
-                    }
-                },
-                required: ['question']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'attempt_completion',
-            description: 'Present the result of a task to the user.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    result: {
-                        type: 'string',
-                        description: 'The result of the task.'
-                    },
-                    command: {
-                        type: 'string',
-                        description: 'The CLI command to execute to show a live demo of the result to the user.'
-                    }
-                },
-                required: ['result']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'planner',
-            description: 'Generate a plan for completing a task.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    task: {
-                        type: 'string',
-                        description: 'The task to plan for.'
-                    }
-                },
-                required: ['task']
-            }
-        }
-    }
-];
 async function getModelList() {
     try {
         const response = await ollama.list();
@@ -226,6 +57,8 @@ function getWebviewContent(modelList) {
             #message-input { flex-grow: 1; padding: 10px; }
             #send-button { padding: 10px 20px; }
             #model-select { margin-bottom: 10px; padding: 5px; }
+            #button-container { margin-top: 10px; }
+            #button-container button { margin-right: 10px; }
         </style>
     </head>
     <body>
@@ -237,12 +70,18 @@ function getWebviewContent(modelList) {
             <input type="text" id="message-input" placeholder="Type your message...">
             <button id="send-button">Send</button>
         </div>
+        <div id="button-container">
+            <button id="export-button">Export Chat</button>
+            <button id="clear-button">Clear Chat</button>
+        </div>
         <script>
             const vscode = acquireVsCodeApi();
             const chatContainer = document.getElementById('chat-container');
             const messageInput = document.getElementById('message-input');
             const sendButton = document.getElementById('send-button');
             const modelSelect = document.getElementById('model-select');
+            const exportButton = document.getElementById('export-button');
+            const clearButton = document.getElementById('clear-button');
 
             function addMessage(text, isUser = false) {
                 const messageElement = document.createElement('p');
@@ -270,11 +109,26 @@ function getWebviewContent(modelList) {
                 vscode.postMessage({ command: 'setModel', model: e.target.value });
             });
 
+            exportButton.addEventListener('click', () => {
+                vscode.postMessage({ command: 'exportChat' });
+            });
+
+            clearButton.addEventListener('click', () => {
+                vscode.postMessage({ command: 'clearChat' });
+                chatContainer.innerHTML = '';
+            });
+
             window.addEventListener('message', event => {
                 const message = event.data;
                 switch (message.command) {
                     case 'receiveMessage':
                         addMessage(message.text);
+                        break;
+                    case 'chatExported':
+                        vscode.window.showInformationMessage('Chat history exported successfully!');
+                        break;
+                    case 'chatCleared':
+                        vscode.window.showInformationMessage('Chat history cleared and reset.');
                         break;
                 }
             });
@@ -290,77 +144,20 @@ function activate(context) {
         });
         const modelList = await getModelList();
         panel.webview.html = getWebviewContent(modelList);
-        let messages = [];
-        const pipelineHandler = new pipelineHandler_1.PipelineHandler();
-        const systemMessage = {
-            role: 'system',
-            content: `You are an AI assistant focused on excelling at software engineering tasks, including product development, planning, and problem-solving. Your capabilities include:
-
-1. Breaking down complex problems into manageable chunks.
-2. Thinking logically and methodically about software development tasks.
-3. Asking clarifying questions when there are missing pieces of information.
-4. Being intuitive about software design and architecture.
-5. Utilizing a range of tool-calling capabilities to assist with various tasks.
-
-You have access to several tools that can help you accomplish tasks. Always try to match your skills and available tools with the user's needs. When no clear coding task or tool use can be determined, engage in a helpful chat to clarify the user's requirements or provide general software engineering advice.
-
-Remember to:
-- Plan before executing, especially for complex tasks.
-- Use your tool-calling capabilities when appropriate.
-- Ask for clarification if a task or requirement is ambiguous.
-- Provide explanations for your decisions and approaches.
-- Offer best practices and design patterns when relevant.
-
-Your goal is to assist users in creating high-quality, efficient, and well-structured software solutions.`
-        };
-        // Add the system message to the beginning of the messages array
-        messages.push(systemMessage);
+        const messageHandler = new messageHandler_1.MessageHandler(panel);
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'sendMessage':
-                    try {
-                        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-                        const modelName = config.get('modelName');
-                        messages.push({ role: 'user', content: message.text });
-                        const response = await ollama.chat({
-                            model: modelName,
-                            messages: messages,
-                            tools: ollamaTools,
-                        });
-                        messages.push(response.message);
-                        panel.webview.postMessage({ command: 'receiveMessage', text: response.message.content });
-                        // Handle tool calls
-                        if (response.message.tool_calls) {
-                            pipelineHandler.clearPipeline();
-                            for (const toolCall of response.message.tool_calls) {
-                                pipelineHandler.addToolCall(toolCall);
-                            }
-                            const cwd = getWorkingDirectory();
-                            const results = await pipelineHandler.executePipeline(cwd);
-                            for (let i = 0; i < results.length; i++) {
-                                const toolCall = response.message.tool_calls[i];
-                                const result = results[i];
-                                messages.push({ role: 'tool', content: JSON.stringify(result), name: toolCall.function.name });
-                                panel.webview.postMessage({ command: 'receiveMessage', text: `Tool ${toolCall.function.name} executed. Result: ${JSON.stringify(result)}` });
-                            }
-                            // Get a follow-up response after tool calls
-                            const followUpResponse = await ollama.chat({
-                                model: modelName,
-                                messages: messages,
-                                tools: ollamaTools,
-                            });
-                            messages.push(followUpResponse.message);
-                            panel.webview.postMessage({ command: 'receiveMessage', text: followUpResponse.message.content });
-                        }
-                    }
-                    catch (error) {
-                        vscode.window.showErrorMessage('Error communicating with Ollama: ' + error);
-                    }
-                    return;
                 case 'setModel':
-                    await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', message.model, vscode.ConfigurationTarget.Global);
-                    return;
+                    await messageHandler.handleMessage(message);
+                    break;
+                case 'exportChat':
+                    await messageHandler.exportChatHistory();
+                    break;
+                case 'clearChat':
+                    await messageHandler.clearChatHistory();
+                    break;
             }
         }, undefined, context.subscriptions);
     });
