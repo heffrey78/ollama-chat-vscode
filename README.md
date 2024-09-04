@@ -14,6 +14,7 @@ This extension allows you to have an AI-powered chat with Ollama models directly
 - Tool-calling capabilities for various development tasks
 - Send messages and receive responses within VSCode
 - Simple and intuitive chat interface
+- Configurable project directory for context-aware assistance
 
 ## Requirements
 
@@ -28,6 +29,16 @@ This extension allows you to have an AI-powered chat with Ollama models directly
 4. Type "Start Ollama Chat" and select the command
 5. A new webview will open with the chat interface
 6. Start chatting with the AI assistant about your software engineering tasks!
+
+## Configuration
+
+You can configure the following settings for the Ollama Chat extension:
+
+- `ollama-chat-vscode.modelName`: The name of the Ollama model to use for chat (default: "llama3.1")
+- `ollama-chat-vscode.workingDirectory`: The working directory for Ollama Chat. If empty, the user's home directory will be used.
+- `ollama-chat-vscode.projectDirectory`: The project directory for Ollama Chat. Defaults to the current working directory (${workspaceFolder}).
+
+To change these settings, go to File > Preferences > Settings (or Code > Preferences > Settings on macOS) and search for "Ollama Chat".
 
 ## AI Assistant Capabilities
 
@@ -48,6 +59,11 @@ When no clear coding task or tool use can be determined, the assistant will enga
 - Error handling is minimal
 
 ## Release Notes
+
+### 0.2.0
+
+- Added configurable project directory for context-aware assistance
+- Updated AI assistant to use project-specific context when available
 
 ### 0.1.0
 

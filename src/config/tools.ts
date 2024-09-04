@@ -1,11 +1,12 @@
 import { Tool } from 'ollama';
+import * as os from 'os';
 
 export const ollamaTools: Tool[] = [
     {
         type: 'function',
         function: {
             name: 'execute_command',
-            description: 'Execute a CLI command on the system.',
+            description: `Execute a CLI command on the local system. Current system info:\n- Platform: ${process.platform}\n- CPU Architecture: ${os.arch()}\n- Node.js Version: ${process.version}\n- System Uptime: ${Math.floor(os.uptime())} seconds`,
             parameters: {
                 type: 'object',
                 properties: {

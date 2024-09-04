@@ -10,11 +10,13 @@ export class MessageHandler {
     private messages: any[];
     private pipelineHandler: PipelineHandler;
     private panel: vscode.WebviewPanel;
+    private projectDirectory: string;
 
-    constructor(panel: vscode.WebviewPanel) {
+    constructor(panel: vscode.WebviewPanel, projectDirectory: string) {
         this.panel = panel;
         this.messages = [systemMessage];
-        this.pipelineHandler = new PipelineHandler();
+        this.pipelineHandler = new PipelineHandler(this);
+        this.projectDirectory = projectDirectory;
     }
 
     public async handleMessage(message: any) {
@@ -26,6 +28,11 @@ export class MessageHandler {
                 await this.handleSetModel(message.model);
                 break;
         }
+    }
+
+    public updateUser(message: any) {
+        this.messages.push({ role: 'tool', content: message });
+        this.panel.webview.postMessage({ command: 'receiveMessage', text: message });
     }
 
     private async handleSendMessage(text: string) {
@@ -45,35 +52,17 @@ export class MessageHandler {
                 await this.handleToolCalls(response.message.tool_calls, modelName);
             }
         } catch (error) {
-            vscode.window.showErrorMessage('Error communicating with Ollama: ' + error);
-        }
-    }
-
-    public static async handleToolMessage(text: string, useTools: boolean): Promise<string> {
-        try {
-            const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-            const modelName = config.get('modelName') as string;
-            const messages = [systemMessage, { role: 'user', content: text }];
-            const response = await ollama.chat({
-                model: modelName,
-                messages: messages,
-                tools: useTools ? ollamaTools : undefined,
-            });
-            return response.message.content;
-        } catch (error) {
-            vscode.window.showErrorMessage('Error communicating with Ollama: ' + error);
-            return '';
+            this.handleErrorMessage('Error communicating with Ollama: ' + error);
         }
     }
 
     private async handleToolCalls(toolCalls: any[], modelName: string) {
-        this.pipelineHandler.clearPipeline();
+        //this.pipelineHandler.clearPipeline();
         for (const toolCall of toolCalls) {
             this.pipelineHandler.addToolCall(toolCall);
         }
 
-        const cwd = this.getWorkingDirectory();
-        const results = await this.pipelineHandler.executePipeline(cwd);
+        const results = await this.pipelineHandler.executePipeline(this.projectDirectory);
 
         for (let i = 0; i < results.length; i++) {
             const toolCall = toolCalls[i];
@@ -96,10 +85,20 @@ export class MessageHandler {
         await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
     }
 
-    private getWorkingDirectory(): string {
-        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-        const configuredDir = config.get('workingDirectory') as string;
-        return configuredDir || require('os').homedir();
+    public async handleToolMessage(text: string, useTools: boolean): Promise<string> {
+        try {
+            const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+            const modelName = config.get('modelName') as string;
+            const messages = [systemMessage, { role: 'user', content: text }];
+            const response = await ollama.chat({
+                model: modelName,
+                messages: messages,
+                tools: useTools ? ollamaTools : undefined,
+            });
+            return response.message.content;
+        } catch (error) {
+            return `Error communicating with Ollama: ${error}`;
+        }
     }
 
     public async exportChatHistory() {
@@ -129,12 +128,16 @@ export class MessageHandler {
                 this.panel.webview.postMessage({ command: 'chatExported' });
             }
         } catch (error) {
-            vscode.window.showErrorMessage('Failed to export chat history: ' + error);
+            this.handleErrorMessage('Failed to export chat history: ' + error);
         }
     }
 
     public async clearChatHistory() {
         this.messages = [systemMessage];
         this.panel.webview.postMessage({ command: 'chatCleared' });
+    }
+
+    public handleErrorMessage(errorMessage: string) {
+        this.panel.webview.postMessage({ command: 'receiveErrorMessage', text: errorMessage });
     }
 }

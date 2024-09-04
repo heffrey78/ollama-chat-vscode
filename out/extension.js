@@ -144,7 +144,9 @@ function activate(context) {
         });
         const modelList = await getModelList();
         panel.webview.html = getWebviewContent(modelList);
-        const messageHandler = new messageHandler_1.MessageHandler(panel);
+        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+        const projectDirectory = config.get('projectDirectory') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        const messageHandler = new messageHandler_1.MessageHandler(panel, projectDirectory);
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
