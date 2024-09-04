@@ -60,7 +60,7 @@ class ExecuteCommandHandler {
                     default:
                         throw new Error(`Unsupported platform: ${os.platform()}`);
                 }
-                const { stdout, stderr } = await execPromise(`${shellCommand} "${args.command}"`, {
+                const { stdout, stderr } = await execPromise(`${shellCommand} ${args.command}`, {
                     cwd: state.get("directoryName") || cwd,
                 });
                 if (stdout) {
@@ -296,7 +296,7 @@ class PipelineFactoryHandler {
                     const response = await this.messageHandler.handleToolMessage(pipelinePrompt + failureReply, false);
                     const trimmedResponse = this.tryParseJson(response);
                     planJson = trimmedResponse.json;
-                    this.messageHandler.updateUser(`Plan JSON: ${planJson}`);
+                    this.messageHandler.updateUser(`Plan JSON: ${JSON.stringify(planJson)}`);
                     // If we reach this point, the response is valid JSON, so break out of the loop.
                     break;
                 }
