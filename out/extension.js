@@ -26,7 +26,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deactivate = exports.activate = void 0;
+exports.activate = activate;
+exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const ollama_1 = require("ollama");
 const node_fetch_1 = __importDefault(require("node-fetch"));
@@ -165,7 +166,5 @@ function activate(context) {
     });
     context.subscriptions.push(disposable);
 }
-exports.activate = activate;
 function deactivate() { }
-exports.deactivate = deactivate;
 //# sourceMappingURL=extension.js.map

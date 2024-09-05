@@ -3,12 +3,12 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import ollama from 'ollama';
 import * as os from 'os';
-import * as child_process from 'child_process';    
-import { MessageHandler } from './messageHandler'; 
+import * as child_process from 'child_process';
+import { MessageHandler } from './messageHandler';
 import { ollamaTools } from './config/tools';
-import { utils, createParser } from 'llm-exe';
+import { createParser } from 'llm-exe';
 import { State } from './pipelineHandler'
-import * as util from 'util';
+import { promisify } from 'util';
 
 export interface ToolHandler {
     messageHandler: MessageHandler;
@@ -23,7 +23,6 @@ export class ExecuteCommandHandler implements ToolHandler {
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
-        const execPromise = util.promisify(child_process.exec);
         const askFollowupHandler = new AskFollowupQuestionHandler(this.messageHandler);
         this.messageHandler.updateUser(`Executing command: ${args.command}`);
 
@@ -32,22 +31,8 @@ export class ExecuteCommandHandler implements ToolHandler {
 
         if (permissionResult.answer?.toUpperCase() === 'YES') {
             try {
-                let shellCommand: string;
-                switch (os.platform()) {
-                    case "win32":
-                        shellCommand = "cmd.exe /c";
-                        break;
-                    case "darwin": // macOS
-                    case "linux":
-                        shellCommand = "bash -c";
-                        break;
-                    default:
-                        throw new Error(`Unsupported platform: ${os.platform()}`);
-                }
-
-                const { stdout, stderr } = await execPromise(`${shellCommand} ${args.command}`, {
-                    cwd: state.get("directoryName") || cwd,
-                });
+                const execPromise = promisify(child_process.exec);
+                const { stdout, stderr } = await execPromise(args.command);
 
                 if (stdout) {
                     this.messageHandler.updateUser(`Command output: ${stdout}`);
@@ -57,6 +42,7 @@ export class ExecuteCommandHandler implements ToolHandler {
                 }
 
                 return { result: stdout, error: stderr };
+
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 this.messageHandler.handleErrorMessage(`Error executing command: ${errorMessage}`);
@@ -185,14 +171,14 @@ export class AskFollowupQuestionHandler implements ToolHandler {
     }
 
     async execute(args: any, cwd: string, state: any): Promise<any> {
-        try {            
+        try {
             // Get the user's answer using a modal dialog
             const answer = await vscode.window.showInputBox({
                 prompt: args.question,
                 placeHolder: 'Type your answer here',
                 ignoreFocusOut: true
             });
-            
+
             this.messageHandler.updateUser(JSON.stringify({ question: args.question, answer }));
             // Return both the question and the answer
             return { question: args.question, answer };
@@ -302,39 +288,39 @@ export class PipelineFactoryHandler implements ToolHandler {
             let planJson = {};
             let errorMessage: string = "";
             this.messageHandler.updateUser("Attempting to create plan.");
-            
+
             while (retryCount < maxRetries) {
-              try {
-                const failureReply: string = retryCount > 0 ? `Attempt #${retryCount + 1} \n Error from JSON.parse when trying to parse previous response: ${errorMessage}` : ""
-                const response = await this.messageHandler.handleToolMessage(pipelinePrompt + failureReply, false);
-                const trimmedResponse = this.tryParseJson(response);
-                planJson = trimmedResponse.json;
+                try {
+                    const failureReply: string = retryCount > 0 ? `Attempt #${retryCount + 1} \n Error from JSON.parse when trying to parse previous response: ${errorMessage}` : ""
+                    const response = await this.messageHandler.handleToolMessage(pipelinePrompt + failureReply, false);
+                    const trimmedResponse = this.tryParseJson(response);
+                    planJson = trimmedResponse.json;
 
-                this.messageHandler.updateUser(`Plan JSON: ${JSON.stringify(planJson)}`);
-                
-                // If we reach this point, the response is valid JSON, so break out of the loop.
-                break;
-              } catch (error) {
-                if(error instanceof SyntaxError){
-                    errorMessage = error.message; 
-                  }
+                    this.messageHandler.updateUser(`Plan JSON: ${JSON.stringify(planJson)}`);
 
-                if (!(error instanceof SyntaxError)) {
-                  // If the error is not due to invalid JSON, rethrow it.        
-                  throw error;
+                    // If we reach this point, the response is valid JSON, so break out of the loop.
+                    break;
+                } catch (error) {
+                    if (error instanceof SyntaxError) {
+                        errorMessage = error.message;
+                    }
+
+                    if (!(error instanceof SyntaxError)) {
+                        // If the error is not due to invalid JSON, rethrow it.        
+                        throw error;
+                    }
+
+                    retryCount++;
+
+                    if (retryCount === maxRetries) {
+                        throw new Error(`Failed to receive valid JSON after ${maxRetries} retries.`);
+                    }
+
+                    // Wait for a short duration before retrying to avoid overwhelming the server.
+                    await new Promise((resolve) => setTimeout(resolve, 500));
                 }
-            
-                retryCount++;
-            
-                if (retryCount === maxRetries) {
-                  throw new Error(`Failed to receive valid JSON after ${maxRetries} retries.`);
-                }
-            
-                // Wait for a short duration before retrying to avoid overwhelming the server.
-                await new Promise((resolve) => setTimeout(resolve, 500));
-              }
             }
-            
+
 
             const keywordsPrompt = `
             Given the following user request and the previously pipeline plan, identify the key file names, programming concepts, or frameworks involved in this task.
@@ -376,7 +362,7 @@ export class PipelineFactoryHandler implements ToolHandler {
             const keywordsResponse = await this.messageHandler.handleToolMessage(keywordsPrompt, false);
             const parsedKeywords = this.parseKeywords(keywordsResponse);
             this.parsePipeline(JSON.stringify(planJson), parsedKeywords);
-            
+
 
             if (this.pipeline) {
                 return this.pipeline; // Return the entire plan object
@@ -392,34 +378,22 @@ export class PipelineFactoryHandler implements ToolHandler {
     private tryParseJson(response: string): { success: boolean; json?: any } {
         let trimmedResponse = response.trim();
         const jsonRegex = /^(\{|\[])([\s\S]*?)(\}|])$/;
-      
+
         if (!jsonRegex.test(trimmedResponse)) {
-          // Remove non-JSON content from the beginning and end of the string
-          trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
+            // Remove non-JSON content from the beginning and end of the string
+            trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
         }
-      
+
         try {
-          const json = JSON.parse(trimmedResponse);
-          return { success: true, json };
+            const json = JSON.parse(trimmedResponse);
+            return { success: true, json };
         } catch (error) {
             this.messageHandler.handleErrorMessage(`Error creating pipeline: ${getErrorMessage(error)}`);
             throw error;
         }
-      }
+    }
 
     private parseKeywords(keywordsResponse: string): Map<string, string> {
-        const keywordsSchema = utils.defineSchema({
-            type: 'array',
-            items: {
-                type: 'object',
-                properties: {
-                    key: { type: 'string' },
-                    value: { type: 'string' }
-                },
-                required: ['key', 'value']
-            }
-        });
-
         const parser = createParser('json');
         const jsonToParse = this.extractJsonFromString(keywordsResponse);
         if (jsonToParse.length > 0) {
@@ -459,11 +433,11 @@ export class PipelineFactoryHandler implements ToolHandler {
     private extractJsonFromString(input: string): string[] {
         const jsonRegex = /(\{[\s\S]*\}|\[[\s\S]*\])/g;
         const matches = input.match(jsonRegex);
-        
+
         if (!matches) {
             return [];
         }
-    
+
         return matches.filter(match => {
             try {
                 JSON.parse(match);
@@ -523,7 +497,6 @@ export async function handleToolCall(name: string, args: any, cwd: string, state
         return acc;
     }, {} as any);
 
-    // Use state.messageHandler, which is now guaranteed to be defined
     const toolHandlers = createToolHandlers(messageHandler);
     const handler = toolHandlers[trimmedName];
     if (handler) {

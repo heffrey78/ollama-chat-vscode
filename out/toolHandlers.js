@@ -26,7 +26,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getErrorMessage = exports.handleToolCall = exports.createToolHandlers = exports.ChatHandler = exports.PipelineFactoryHandler = exports.AttemptCompletionHandler = exports.AskFollowupQuestionHandler = exports.WriteToFileHandler = exports.ReadFileHandler = exports.ViewSourceCodeDefinitionsHandler = exports.ListFilesRecursiveHandler = exports.ListFilesTopLevelHandler = exports.ExecuteCommandHandler = void 0;
+exports.createToolHandlers = exports.ChatHandler = exports.PipelineFactoryHandler = exports.AttemptCompletionHandler = exports.AskFollowupQuestionHandler = exports.WriteToFileHandler = exports.ReadFileHandler = exports.ViewSourceCodeDefinitionsHandler = exports.ListFilesRecursiveHandler = exports.ListFilesTopLevelHandler = exports.ExecuteCommandHandler = void 0;
+exports.handleToolCall = handleToolCall;
+exports.getErrorMessage = getErrorMessage;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs/promises"));
@@ -35,34 +37,20 @@ const os = __importStar(require("os"));
 const child_process = __importStar(require("child_process"));
 const tools_1 = require("./config/tools");
 const llm_exe_1 = require("llm-exe");
-const util = __importStar(require("util"));
+const util_1 = require("util");
 class ExecuteCommandHandler {
     constructor(messageHandler) {
         this.messageHandler = messageHandler;
     }
     async execute(args, cwd, state) {
-        const execPromise = util.promisify(child_process.exec);
         const askFollowupHandler = new AskFollowupQuestionHandler(this.messageHandler);
         this.messageHandler.updateUser(`Executing command: ${args.command}`);
         const permissionQuestion = `Do you want to execute the following command on ${os.platform()}?\n${args.command}\n\nReply with 'YES' to proceed.`;
         const permissionResult = await askFollowupHandler.execute({ question: permissionQuestion }, cwd, state);
         if (permissionResult.answer?.toUpperCase() === 'YES') {
             try {
-                let shellCommand;
-                switch (os.platform()) {
-                    case "win32":
-                        shellCommand = "cmd.exe /c";
-                        break;
-                    case "darwin": // macOS
-                    case "linux":
-                        shellCommand = "bash -c";
-                        break;
-                    default:
-                        throw new Error(`Unsupported platform: ${os.platform()}`);
-                }
-                const { stdout, stderr } = await execPromise(`${shellCommand} ${args.command}`, {
-                    cwd: state.get("directoryName") || cwd,
-                });
+                const execPromise = (0, util_1.promisify)(child_process.exec);
+                const { stdout, stderr } = await execPromise(args.command);
                 if (stdout) {
                     this.messageHandler.updateUser(`Command output: ${stdout}`);
                 }
@@ -385,17 +373,6 @@ class PipelineFactoryHandler {
         }
     }
     parseKeywords(keywordsResponse) {
-        const keywordsSchema = llm_exe_1.utils.defineSchema({
-            type: 'array',
-            items: {
-                type: 'object',
-                properties: {
-                    key: { type: 'string' },
-                    value: { type: 'string' }
-                },
-                required: ['key', 'value']
-            }
-        });
         const parser = (0, llm_exe_1.createParser)('json');
         const jsonToParse = this.extractJsonFromString(keywordsResponse);
         if (jsonToParse.length > 0) {
@@ -492,7 +469,6 @@ async function handleToolCall(name, args, cwd, state, messageHandler) {
         }
         return acc;
     }, {});
-    // Use state.messageHandler, which is now guaranteed to be defined
     const toolHandlers = (0, exports.createToolHandlers)(messageHandler);
     const handler = toolHandlers[trimmedName];
     if (handler) {
@@ -507,11 +483,9 @@ async function handleToolCall(name, args, cwd, state, messageHandler) {
         return await toolHandlers['chat'].execute({ message: `${trimmedName}: ${JSON.stringify(trimmedArgs)}` }, cwd, state);
     }
 }
-exports.handleToolCall = handleToolCall;
 function getErrorMessage(error) {
     if (error instanceof Error)
         return error.message;
     return String(error);
 }
-exports.getErrorMessage = getErrorMessage;
 //# sourceMappingURL=toolHandlers.js.map
