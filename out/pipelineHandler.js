@@ -25,44 +25,46 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PipelineHandler = void 0;
 const uuid = __importStar(require("uuid"));
-const toolHandlers_1 = require("./toolHandlers");
+const executables_1 = require("./executables");
 class PipelineHandler {
     constructor(messageHandler) {
         this.toolCalls = [];
         this.state = new Map();
         this.messageHandler = messageHandler;
     }
-    addToolCall(toolCall) {
-        toolCall.id = toolCall.id || uuid.v4();
-        this.toolCalls.push(toolCall);
+    addToolCalls(newToolCalls) {
+        const toolCallsToAdd = Array.isArray(newToolCalls) ? newToolCalls : [newToolCalls];
+        for (const toolCall of toolCallsToAdd) {
+            toolCall.id = toolCall.id || uuid.v4();
+        }
+        this.toolCalls.unshift(...toolCallsToAdd);
+    }
+    getToolCalls() {
+        return this.toolCalls;
     }
     async executePipeline(cwd) {
         const results = [];
         let processedToolCalls = [];
         while (this.toolCalls.length > 0) {
             const toolCall = this.toolCalls.shift();
-            if (toolCall && !processedToolCalls.find(x => x.id == toolCall.id)) {
+            if (toolCall && !processedToolCalls.find(x => x.id === toolCall.id)) {
                 try {
                     const result = await this.executeToolCall(toolCall, cwd);
                     results.push(result);
-                    this.messageHandler.updateUser(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
+                    this.messageHandler.sendUpdateToPanel(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
                     // Update state and process pipeline or tool call array results
                     this.updateState(toolCall.function.name, result);
                     if (this.isPipeline(result)) {
                         this.state.set('pipelineName', result.name);
                         this.state.set('directoryName', result.directoryName);
-                        for (const task of result.tasks) {
-                            this.addToolCall(task);
-                        }
+                        this.addToolCalls(result.tasks);
                     }
                     else if (Array.isArray(result) && result.every(item => this.isToolCall(item))) {
-                        for (const newToolCall of result) {
-                            this.addToolCall(newToolCall);
-                        }
+                        this.addToolCalls(result);
                     }
                 }
                 catch (error) {
-                    this.messageHandler.updateUser(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
+                    this.messageHandler.sendUpdateToPanel(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
                 }
                 finally {
                     processedToolCalls.push(toolCall);
@@ -79,7 +81,7 @@ class PipelineHandler {
     }
     async executeToolCall(toolCall, cwd) {
         const args = toolCall.function.arguments ? this.updateArgumentsFromState(JSON.stringify(toolCall.function.arguments)) : "";
-        return await (0, toolHandlers_1.handleToolCall)(toolCall.function.name, JSON.parse(args), cwd, this.state, this.messageHandler);
+        return await (0, executables_1.executeTool)(toolCall.function.name, JSON.parse(args), cwd, this.state, this.messageHandler);
     }
     updateArgumentsFromState(args) {
         let replacedArgs = args;

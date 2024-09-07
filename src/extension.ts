@@ -1,44 +1,32 @@
 import * as vscode from 'vscode';
-import { Ollama } from 'ollama';
-import fetch from 'node-fetch';
-import { MessageHandler } from './messageHandler';
+import { Orchestrator } from './orchestrator';
 
-const ollama = new Ollama({ fetch: fetch as any });
-
-async function getModelList(): Promise<string[]> {
-    try {
-        const response = await ollama.list();
-        return response.models.map(model => model.name);
-    } catch (error) {
-        console.error('Error fetching model list:', error);
-        return [];
-    }
-}
-
-function getWebviewContent(modelList: string[]) {
-    const modelOptions = modelList.map(model => `<option value="${model}">${model}</option>`).join('');
-
+function getWebviewContent() {
+    
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Ollama Chat</title>
+        <title>LLM Chat</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-            #chat-container { height: 65vh; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+            #chat-container { height: 60vh; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
             #input-container { display: flex; margin-top: 20px; }
             #message-input { flex-grow: 1; padding: 10px; }
             #send-button { padding: 10px 20px; }
-            #model-select { margin-bottom: 10px; padding: 5px; }
+            #provider-select, #model-select { margin-bottom: 10px; padding: 5px; }
             #button-container { margin-top: 10px; }
             #button-container button { margin-right: 10px; }
         </style>
     </head>
     <body>
-        <select id="model-select">
-            ${modelOptions}
+        <select id="provider-select">
+            <option value="ollama">Ollama</option>
+            <option value="claude">Claude</option>
+            <option value="openai">OpenAI</option>
         </select>
+        <select id="model-select"></select>
         <div id="chat-container"></div>
         <div id="input-container">
             <input type="text" id="message-input" placeholder="Type your message...">
@@ -53,13 +41,14 @@ function getWebviewContent(modelList: string[]) {
             const chatContainer = document.getElementById('chat-container');
             const messageInput = document.getElementById('message-input');
             const sendButton = document.getElementById('send-button');
+            const providerSelect = document.getElementById('provider-select');
             const modelSelect = document.getElementById('model-select');
             const exportButton = document.getElementById('export-button');
             const clearButton = document.getElementById('clear-button');
 
             function addMessage(text, isUser = false) {
                 const messageElement = document.createElement('p');
-                messageElement.textContent = (isUser ? 'You: ' : 'Ollama: ') + text;
+                messageElement.textContent = (isUser ? 'You: ' : 'LLM: ') + text;
                 chatContainer.appendChild(messageElement);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
@@ -77,6 +66,10 @@ function getWebviewContent(modelList: string[]) {
                 if (e.key === 'Enter') {
                     sendButton.click();
                 }
+            });
+
+            providerSelect.addEventListener('change', (e) => {
+                vscode.postMessage({ command: 'setProvider', provider: e.target.value });
             });
 
             modelSelect.addEventListener('change', (e) => {
@@ -98,6 +91,16 @@ function getWebviewContent(modelList: string[]) {
                     case 'receiveMessage':
                         addMessage(message.text);
                         break;
+                    case 'updateProviders':
+                        providerSelect.innerHTML = message.providers.map(provider => 
+                            '<option value="' + provider + '">' + provider + '</option>'
+                        ).join('');
+                        break;
+                    case 'updateModels':
+                        modelSelect.innerHTML = message.models.map(model => 
+                            '<option value="' + model + '">' + model + '</option>'
+                        ).join('');
+                        break;
                     case 'chatExported':
                         vscode.window.showInformationMessage('Chat history exported successfully!');
                         break;
@@ -106,44 +109,75 @@ function getWebviewContent(modelList: string[]) {
                         break;
                 }
             });
+
+            // Initial provider and model refresh
+            vscode.postMessage({ command: 'refreshProviders' });
+            vscode.postMessage({ command: 'refreshModels' });
         </script>
     </body>
     </html>`;
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Ollama Chat extension is now active!');
+    console.log('LLM Chat extension is now active!');
 
     let disposable = vscode.commands.registerCommand('ollama-chat-vscode.startChat', async () => {
         const panel = vscode.window.createWebviewPanel(
-            'ollamaChat',
-            'Ollama Chat',
+            'llmChat',
+            'LLM Chat',
             vscode.ViewColumn.One,
             {
                 enableScripts: true
             }
         );
 
-        const modelList = await getModelList();
-        panel.webview.html = getWebviewContent(modelList);
+        panel.webview.html = getWebviewContent();
 
         const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
         const projectDirectory = config.get<string>('projectDirectory') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        const messageHandler = new MessageHandler(panel, projectDirectory);
+        const orchestrator = new Orchestrator(panel, config, projectDirectory);
 
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.command) {
-                    case 'sendMessage':
-                    case 'setModel':
-                        await messageHandler.handleMessage(message);
-                        break;
                     case 'exportChat':
-                        await messageHandler.exportChatHistory();
+                        await orchestrator.exportChatHistory();
+                        panel.webview.postMessage({ command: 'chatExported', text: 'Chat exported' });
                         break;
                     case 'clearChat':
-                        await messageHandler.clearChatHistory();
+                        await orchestrator.clearChatHistory();
+                        panel.webview.postMessage({ command: 'chatCleared', text: 'Chat cleared' });
+                        break;
+                    case 'sendMessage':
+                        const response = await orchestrator.handleMessage(message);
+                        panel.webview.postMessage({ command: 'receiveMessage', text: response });
+                        break;                        
+                    case 'refreshProviders':
+                        const providersResponse = await orchestrator.handleMessage(message);
+                        const providers = JSON.parse(providersResponse.content);
+                        panel.webview.postMessage({ command: 'updateProviders', providers: providers });
+                        break;  
+                    case 'refreshModels':
+                        const modelsResponse = await orchestrator.handleMessage(message);
+                        const models = JSON.parse(modelsResponse.content);
+                        const provider = orchestrator.getModelProvider();
+                        panel.webview.postMessage({ command: 'setProvider', provider: provider });
+                        panel.webview.postMessage({ command: 'updateModels', models: models });
+                        break;  
+                    case 'setModel':
+                        await orchestrator.handleMessage(message);
+                        panel.webview.postMessage({ command: 'setModel', model: message });
+                        break;  
+                    case 'setProvider':
+                        await orchestrator.handleMessage(message);
+                        panel.webview.postMessage({ command: 'setProvider', provider: message.provider });
+                        const setModels = await orchestrator.getModelsByProvider(message.provider);
+                        panel.webview.postMessage({ command: 'updateModels', models: setModels });
+                        panel.webview.html = getWebviewContent();
+                        break;  
+                    default:
+                        await orchestrator.handleMessage(message);
                         break;
                 }
             },
@@ -151,6 +185,7 @@ export function activate(context: vscode.ExtensionContext) {
             context.subscriptions
         );
     });
+
 
     context.subscriptions.push(disposable);
 }

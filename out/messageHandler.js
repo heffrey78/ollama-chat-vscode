@@ -25,11 +25,10 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MessageHandler = void 0;
 const vscode = __importStar(require("vscode"));
-const ollama_1 = require("ollama");
 const pipelineHandler_1 = require("./pipelineHandler");
 const tools_1 = require("./config/tools");
 const systemMessage_1 = require("./config/systemMessage");
-const ollama = new ollama_1.Ollama({ fetch: fetch });
+const llmClients_1 = require("./llmClients");
 class MessageHandler {
     constructor(panel, projectDirectory) {
         this.panel = panel;
@@ -40,42 +39,124 @@ class MessageHandler {
     async handleMessage(message) {
         switch (message.command) {
             case 'sendMessage':
-                await this.handleSendMessage(message.text);
+                await this.executeLlmChatRequest(message.text);
+                break;
+            case 'sendToolMessage':
+                await this.executeLlmToolRequest(message.text, true);
                 break;
             case 'setModel':
-                await this.handleSetModel(message.model);
+                await this.setModel(message.model);
+                break;
+            case 'setProvider':
+                await this.setModelProvider(message.provider);
+                break;
+            case 'refreshProviders':
+                this.updateProviderList();
+                break;
+            case 'refreshModels':
+                await this.updateModelList();
                 break;
         }
     }
-    updateUser(message) {
-        this.messages.push({ role: 'tool', content: message });
-        this.panel.webview.postMessage({ command: 'receiveMessage', text: message });
-    }
-    async handleSendMessage(text) {
+    async executeLlmChatRequest(text) {
         try {
-            const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-            const modelName = config.get('modelName');
+            const modelName = this.llmClient.model;
             this.messages.push({ role: 'user', content: text });
-            const response = await ollama.chat({
+            const response = await this.llmClient.chat({
                 model: modelName,
                 messages: this.messages,
-                tools: tools_1.ollamaTools,
+                stream: false,
+                options: {
+                    tools: tools_1.ollamaTools
+                }
             });
             this.messages.push(response.message);
-            this.panel.webview.postMessage({ command: 'receiveMessage', text: response.message.content });
             if (response.message.tool_calls) {
-                await this.handleToolCalls(response.message.tool_calls, modelName);
+                this.panel.webview.postMessage({ command: 'receiveMessage', text: `Tool calls: ${JSON.stringify(response.message)}` });
+                await this.addToolCallsExecutePipeline(response.message.tool_calls, modelName);
+            }
+            else if (response.message.content) {
+                this.panel.webview.postMessage({ command: 'receiveMessage', text: response.message.content });
             }
         }
         catch (error) {
-            this.handleErrorMessage('Error communicating with Ollama: ' + error);
+            this.handleErrorMessage('Error communicating with LLM: ' + error);
         }
     }
-    async handleToolCalls(toolCalls, modelName) {
-        //this.pipelineHandler.clearPipeline();
-        for (const toolCall of toolCalls) {
-            this.pipelineHandler.addToolCall(toolCall);
+    async executeLlmToolRequest(text, useTools) {
+        try {
+            const modelName = this.llmClient.model;
+            const messages = [systemMessage_1.systemMessage, { role: 'user', content: text }];
+            const response = await this.llmClient.chat({
+                model: modelName,
+                messages: messages,
+                stream: false,
+                options: {
+                    tools: useTools ? tools_1.ollamaTools : undefined
+                }
+            });
+            return response.message.content || '';
         }
+        catch (error) {
+            return `Error communicating with LLM: ${error}`;
+        }
+    }
+    async setModel(model) {
+        await this.llmClient.setModel(model);
+    }
+    async setModelProvider(provider) {
+        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('provider', provider, vscode.ConfigurationTarget.Global);
+        if (!this.llmClient || !this.llmClient.provider || this.llmClient.provider != provider) {
+            await this.initializeLlmClient(provider);
+        }
+    }
+    sendUpdateToPanel(message) {
+        this.messages.push({ role: 'tool', content: message });
+        this.panel.webview.postMessage({ command: 'receiveMessage', text: message });
+    }
+    async initializeLlmClient(provider = "ollama") {
+        try {
+            this.llmClient = await (0, llmClients_1.createLlmClient)(provider);
+            this.updateProviderList();
+            await this.updateModelList();
+        }
+        catch (error) {
+            if (error instanceof Error && error.message.includes('API key is not set')) {
+                await this.handleApiKeyRequest(provider);
+            }
+            else {
+                throw error;
+            }
+        }
+    }
+    async handleApiKeyRequest(provider) {
+        const apiKey = await vscode.window.showInputBox({
+            prompt: `Please enter your ${provider} API key`,
+            password: true
+        });
+        if (apiKey) {
+            await vscode.workspace.getConfiguration('ollama-chat-vscode').update(`${provider}ApiKey`, apiKey, vscode.ConfigurationTarget.Global);
+            this.llmClient = await (0, llmClients_1.createLlmClient)(provider);
+        }
+        else {
+            throw new Error(`${provider} API key is required`);
+        }
+    }
+    updateProviderList() {
+        const providers = ['ollama', 'claude', 'openai'];
+        this.panel.webview.postMessage({ command: 'updateProviders', providers });
+    }
+    async updateModelList() {
+        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+        const provider = config.get('provider');
+        if (!this.llmClient || this.llmClient.provider != provider) {
+            this.llmClient = await (0, llmClients_1.createLlmClient)(provider);
+        }
+        const updatedModels = await this.llmClient.getModels();
+        this.panel.webview.postMessage({ command: 'updateModels', models: updatedModels });
+    }
+    async addToolCallsExecutePipeline(toolCalls, modelName) {
+        this.pipelineHandler.addToolCalls(toolCalls);
         const results = await this.pipelineHandler.executePipeline(this.projectDirectory);
         for (let i = 0; i < results.length; i++) {
             const toolCall = toolCalls[i];
@@ -84,32 +165,16 @@ class MessageHandler {
             this.panel.webview.postMessage({ command: 'receiveMessage', text: `Tool ${toolCall.function.name} executed. Result: ${JSON.stringify(result)}` });
         }
         // Get a follow-up response after tool calls
-        const followUpResponse = await ollama.chat({
+        const followUpResponse = await this.llmClient.chat({
             model: modelName,
             messages: this.messages,
-            tools: tools_1.ollamaTools,
+            stream: false,
+            options: {
+                tools: tools_1.ollamaTools
+            }
         });
         this.messages.push(followUpResponse.message);
         this.panel.webview.postMessage({ command: 'receiveMessage', text: followUpResponse.message.content });
-    }
-    async handleSetModel(model) {
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
-    }
-    async handleToolMessage(text, useTools) {
-        try {
-            const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-            const modelName = config.get('modelName');
-            const messages = [systemMessage_1.systemMessage, { role: 'user', content: text }];
-            const response = await ollama.chat({
-                model: modelName,
-                messages: messages,
-                tools: useTools ? tools_1.ollamaTools : undefined,
-            });
-            return response.message.content;
-        }
-        catch (error) {
-            return `Error communicating with Ollama: ${error}`;
-        }
     }
     async exportChatHistory() {
         const chatHistory = this.messages.map(msg => {
@@ -117,7 +182,7 @@ class MessageHandler {
                 return `User: ${msg.content}`;
             }
             else if (msg.role === 'assistant') {
-                return `Ollama: ${msg.content}`;
+                return `LLM: ${msg.content}`;
             }
             else if (msg.role === 'system') {
                 return `System: ${msg.content}`;
@@ -148,7 +213,7 @@ class MessageHandler {
         this.panel.webview.postMessage({ command: 'chatCleared' });
     }
     handleErrorMessage(errorMessage) {
-        this.panel.webview.postMessage({ command: 'receiveErrorMessage', text: errorMessage });
+        this.panel.webview.postMessage({ command: 'receiveMessage', text: errorMessage });
     }
 }
 exports.MessageHandler = MessageHandler;

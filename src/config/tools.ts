@@ -1,6 +1,8 @@
 import { Tool } from 'ollama';
 import * as os from 'os';
 
+export { Tool };
+
 export const ollamaTools: Tool[] = [
     {
         type: 'function',
@@ -160,6 +162,23 @@ export const ollamaTools: Tool[] = [
                     }
                 },
                 required: ['task']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'project_folder',
+            description: 'Check if a project folder exists, and create it if it does not.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    projectName: {
+                        type: 'string',
+                        description: 'The name of the project folder to check or create.'
+                    }
+                },
+                required: ['projectName']
             }
         }
     }

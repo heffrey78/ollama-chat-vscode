@@ -1,8 +1,8 @@
 {
   "name": "ollama-chat-vscode",
   "displayName": "Ollama Chat",
-  "description": "ChatGPT-style chat with Ollama models in VSCode",
-  "version": "0.0.4",
+  "description": "ChatGPT-style chat with multiple LLM providers in VSCode",
+  "version": "0.0.5",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -17,26 +17,46 @@
     "commands": [
       {
         "command": "ollama-chat-vscode.startChat",
-        "title": "Start Ollama Chat"
+        "title": "Start LLM Chat"
       }
     ],
     "configuration": {
-      "title": "Ollama Chat",
+      "title": "LLM Chat",
       "properties": {
+        "ollama-chat-vscode.provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "claude",
+            "openai"
+          ],
+          "default": "ollama",
+          "description": "The LLM provider to use for chat"
+        },
         "ollama-chat-vscode.modelName": {
           "type": "string",
           "default": "llama3.1",
           "description": "The name of the Ollama model to use for chat"
         },
+        "ollama-chat-vscode.claudeApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "The API key for Claude"
+        },
+        "ollama-chat-vscode.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "The API key for OpenAI"
+        },
         "ollama-chat-vscode.workingDirectory": {
           "type": "string",
           "default": "",
-          "description": "The working directory for Ollama Chat. If empty, the user's home directory will be used."
+          "description": "The working directory for LLM Chat. If empty, the user's home directory will be used."
         },
         "ollama-chat-vscode.projectDirectory": {
           "type": "string",
           "default": "${workspaceFolder}",
-          "description": "The project directory for Ollama Chat. Defaults to the current working directory."
+          "description": "The project directory for LLM Chat. Defaults to the current working directory."
         }
       }
     }
@@ -60,6 +80,8 @@
     "typescript": "^4.2.4"
   },
   "dependencies": {
+    "@types/axios": "^0.14.0",
+    "axios": "^0.21.4",
     "llm-exe": "^2.0.0-beta.8",
     "node-fetch": "^2.7.0",
     "ollama": "^0.5.8",

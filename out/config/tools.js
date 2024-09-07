@@ -186,6 +186,23 @@ exports.ollamaTools = [
                 required: ['task']
             }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'project_folder',
+            description: 'Check if a project folder exists, and create it if it does not.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    projectName: {
+                        type: 'string',
+                        description: 'The name of the project folder to check or create.'
+                    }
+                },
+                required: ['projectName']
+            }
+        }
     }
 ];
 //# sourceMappingURL=tools.js.map

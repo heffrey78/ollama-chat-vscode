@@ -1,6 +1,6 @@
 import * as uuid from "uuid";
-import { handleToolCall } from './toolHandlers';
-import { MessageHandler } from "./messageHandler";
+import { executeTool } from './executables';
+import { Orchestrator } from "./orchestrator";
 
 export interface ToolCall {
     id?: string;
@@ -28,17 +28,24 @@ export interface Pipeline {
 export class PipelineHandler {
     private toolCalls: ToolCall[];
     private state: Map<string, any>;
-    public messageHandler: MessageHandler;
+    public messageHandler: Orchestrator;
 
-    constructor(messageHandler: MessageHandler) {
+    constructor(messageHandler: Orchestrator) {
         this.toolCalls = [];
         this.state = new Map();
         this.messageHandler = messageHandler;
     }
 
-    addToolCall(toolCall: ToolCall) {
-        toolCall.id = toolCall.id || uuid.v4();
-        this.toolCalls.push(toolCall);
+    addToolCalls(newToolCalls: ToolCall | ToolCall[]) {
+        const toolCallsToAdd = Array.isArray(newToolCalls) ? newToolCalls : [newToolCalls];
+        for (const toolCall of toolCallsToAdd) {
+            toolCall.id = toolCall.id || uuid.v4();
+        }
+        this.toolCalls.unshift(...toolCallsToAdd);
+    }
+
+    getToolCalls(): ToolCall[] {
+      return this.toolCalls;
     }
 
     async executePipeline(cwd: string): Promise<any[]> {
@@ -47,11 +54,11 @@ export class PipelineHandler {
       
         while (this.toolCalls.length > 0) {
           const toolCall = this.toolCalls.shift();
-          if (toolCall && !processedToolCalls.find(x => x.id == toolCall.id)) {
+          if (toolCall && !processedToolCalls.find(x => x.id === toolCall.id)) {
             try {
               const result = await this.executeToolCall(toolCall, cwd);
               results.push(result);
-              this.messageHandler.updateUser(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
+              this.messageHandler.sendUpdateToPanel(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
       
               // Update state and process pipeline or tool call array results
               this.updateState(toolCall.function.name, result);
@@ -59,16 +66,12 @@ export class PipelineHandler {
               if (this.isPipeline(result)) {
                 this.state.set('pipelineName', result.name);
                 this.state.set('directoryName', result.directoryName);
-                for (const task of result.tasks) {
-                  this.addToolCall(task);
-                }
+                this.addToolCalls(result.tasks);
               } else if (Array.isArray(result) && result.every(item => this.isToolCall(item))) {
-                for (const newToolCall of result) {
-                  this.addToolCall(newToolCall);
-                }
+                this.addToolCalls(result);
               }
             } catch (error) {
-                this.messageHandler.updateUser(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
+                this.messageHandler.sendUpdateToPanel(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
             } finally {
                 processedToolCalls.push(toolCall);
             }
@@ -76,7 +79,7 @@ export class PipelineHandler {
         }
       
         return results;
-      }
+    }
       
     private isToolCall(obj: any): obj is ToolCall {
         return obj && typeof obj === 'object' && obj.function && typeof obj.function.name === 'string';
@@ -89,7 +92,7 @@ export class PipelineHandler {
     private async executeToolCall(toolCall: ToolCall, cwd: string): Promise<any> {
         const args = toolCall.function.arguments ? this.updateArgumentsFromState(JSON.stringify(toolCall.function.arguments)) : "";
         
-        return await handleToolCall(toolCall.function.name, JSON.parse(args), cwd, this.state, this.messageHandler);
+        return await executeTool(toolCall.function.name, JSON.parse(args), cwd, this.state, this.messageHandler);
     }
 
     private updateArgumentsFromState(args: string): string {
@@ -109,7 +112,7 @@ export class PipelineHandler {
         }
       
         return replacedArgs;
-      }
+    }
 
     private updateState(toolName: string, result: any) {
         this.state.set(toolName, result);
