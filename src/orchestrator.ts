@@ -6,11 +6,11 @@ import { systemMessage } from './config/systemMessage';
 import { LlmClient, createLlmClient } from './llmClients';
 
 // Extend the Message type to include the 'name' property for tool messages
-type ExtendedMessage = Message & { name?: string };
+type ToolMessage = Message & { name?: string };
 
 export class Orchestrator {
     private config: vscode.WorkspaceConfiguration;
-    private messages: ExtendedMessage[];
+    private messages: ToolMessage[];
     private pipelineHandler: PipelineHandler;
     private panel: vscode.WebviewPanel;
     private projectDirectory: string;
@@ -19,7 +19,7 @@ export class Orchestrator {
     constructor(panel: vscode.WebviewPanel, config: vscode.WorkspaceConfiguration, projectDirectory: string) {
         this.panel = panel;
         this.config = config;
-        this.messages = [systemMessage as ExtendedMessage];
+        this.messages = [systemMessage as ToolMessage];
         this.pipelineHandler = new PipelineHandler(this);
         this.projectDirectory = projectDirectory;
     }
@@ -27,11 +27,13 @@ export class Orchestrator {
 public async handleMessage(message: any): Promise<Message> {
         switch (message.command) {
             case 'sendMessage':
-                let chatResponse = await this.executeLlmChatRequest(message.text);
+                let toolCallResponse: any;
+                toolCallResponse = await this.determineToolCall(message.text);
+
                 if(this.pipelineHandler.getToolCalls().length > 0) {
                     return this.executePipeline();
                 }
-                return message;
+                return toolCallResponse;
                 break;
             case 'setModel':
                 await this.setModel(message.model);
@@ -55,11 +57,16 @@ public async handleMessage(message: any): Promise<Message> {
             case 'executePipeline':
                 return await this.executePipeline();
                 break;
+            default:
+                return { role: 'assistant', content: 'No message handler found.'};
         }
-        return { role: 'assistant', content: 'No message handler found.'};
     }
 
-    private async executeLlmChatRequest(text: string): Promise<Message> {
+    private async determineToolCall(text: string): Promise<Message> {
+        return await this.executeLlmChatRequest(text, true);
+    }
+
+    private async executeLlmChatRequest(text: string, tool_use: boolean = false): Promise<Message> {
         try {
             const modelName = this.llmClient.model;
             this.messages.push({ role: 'user', content: text });
@@ -67,18 +74,22 @@ public async handleMessage(message: any): Promise<Message> {
                 model: modelName,
                 messages: this.messages,
                 stream: false,
-                options: {
-                    tools: ollamaTools
-                }
+                tools: tool_use ? ollamaTools : undefined
             } as ChatRequest);
-            this.messages.push(response.message as ExtendedMessage);
+
+            if(tool_use) {
+                this.messages.push(response.message as ToolMessage);
+            } else {
+                this.messages.push(response.message);
+            }
+            
 
             if (response.message.tool_calls) {
                 this.addToolCallsToPipeline(response.message.tool_calls);
             } 
             return response.message
         } catch (error) {
-            this.sendErrorToPanel('Error communicating with LLM: ' + error);
+            this.sendErrorToPanel('Error communicating with LLM: ' + JSON.stringify(error));
         }
         return { role: 'assistant', content: 'An unexpected error occurred' };
     }
@@ -204,6 +215,6 @@ public async handleMessage(message: any): Promise<Message> {
     }
 
     public async clearChatHistory() {
-        this.messages = [systemMessage as ExtendedMessage];
+        this.messages = [systemMessage as ToolMessage];
     }
 }

@@ -30,7 +30,7 @@ class PipelineHandler {
     constructor(messageHandler) {
         this.toolCalls = [];
         this.state = new Map();
-        this.messageHandler = messageHandler;
+        this.orchestrator = messageHandler;
     }
     addToolCalls(newToolCalls) {
         const toolCallsToAdd = Array.isArray(newToolCalls) ? newToolCalls : [newToolCalls];
@@ -42,6 +42,77 @@ class PipelineHandler {
     getToolCalls() {
         return this.toolCalls;
     }
+    async generatePipelinePart(pipelinePrompt) {
+        const maxRetries = 3;
+        let retryCount = 0;
+        let pipelineJson = {};
+        let errorMessage = "";
+        while (retryCount < maxRetries) {
+            try {
+                const failureReply = retryCount > 0 ? `Attempt #${retryCount + 1}. Error from JSON.parse when trying to parse previous response: ${errorMessage}` : "";
+                const pipelineMessage = { command: 'sendMessage', text: pipelinePrompt + failureReply, tool_use: false };
+                const pipelineResponse = await this.orchestrator.handleMessage(pipelineMessage);
+                const trimmedResponse = this.tryParseJson(pipelineResponse.content);
+                pipelineJson = trimmedResponse.json;
+                // If we reach this point, the response is valid JSON, so break out of the loop.
+                break;
+            }
+            catch (error) {
+                if (error instanceof SyntaxError) {
+                    errorMessage = error.message;
+                }
+                if (!(error instanceof SyntaxError)) {
+                    // If the error is not due to invalid JSON, rethrow it.        
+                    throw error;
+                }
+                retryCount++;
+                if (retryCount === maxRetries) {
+                    throw new Error(`Failed to receive valid JSON after ${maxRetries} retries.`);
+                }
+                // Wait for a short duration before retrying to avoid overwhelming the server.
+                await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+        }
+        if (pipelineJson) {
+            return pipelineJson; // Return the entire plan object
+        }
+        else {
+            throw new Error('Failed to parse plan');
+        }
+    }
+    tryParseJson(response) {
+        // we need to remove the characters after the last } as well
+        let trimmedResponse = response.trim();
+        const jsonRegex = /^(\{|\[])([\s\S]*?)(\}|])$/;
+        if (!jsonRegex.test(trimmedResponse)) {
+            // Remove non-JSON content from the beginning and end of the string
+            trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
+        }
+        try {
+            const json = JSON.parse(trimmedResponse);
+            return { success: true, json };
+        }
+        catch (error) {
+            this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${this.getErrorMessage(error)}`);
+            throw error;
+        }
+    }
+    // private parsePipeline(pipelineString: string,): Pipeline {
+    //   const parser = createParser('json');
+    //   if (pipelineString.length > 0) {
+    //     const parsedPipeline = parser.parse(pipelineString);
+    //     console.log(JSON.stringify(parsedPipeline));
+    //     return {
+    //       name: parsedPipeline.name,
+    //       directoryName: parsedPipeline.directoryName,
+    //       objectives: parsedPipeline.objectives,
+    //       tasks: parsedPipeline.tasks,
+    //       state: parsedPipeline.key_concepts
+    //     };
+    //   } else {
+    //     console.log('Failed to parse pipeline');
+    //   }
+    // }
     async executePipeline(cwd) {
         const results = [];
         let processedToolCalls = [];
@@ -51,7 +122,7 @@ class PipelineHandler {
                 try {
                     const result = await this.executeToolCall(toolCall, cwd);
                     results.push(result);
-                    this.messageHandler.sendUpdateToPanel(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
+                    this.orchestrator.sendUpdateToPanel(`Called: ${toolCall.function.name} with arguments ${JSON.stringify(toolCall.function.arguments)}. \n\n The result was ${result}`);
                     // Update state and process pipeline or tool call array results
                     this.updateState(toolCall.function.name, result);
                     if (this.isPipeline(result)) {
@@ -64,7 +135,7 @@ class PipelineHandler {
                     }
                 }
                 catch (error) {
-                    this.messageHandler.sendUpdateToPanel(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
+                    this.orchestrator.sendUpdateToPanel(`Error executing tool call "${toolCall.function.name}": \n\n ${error}`);
                 }
                 finally {
                     processedToolCalls.push(toolCall);
@@ -81,7 +152,7 @@ class PipelineHandler {
     }
     async executeToolCall(toolCall, cwd) {
         const args = toolCall.function.arguments ? this.updateArgumentsFromState(JSON.stringify(toolCall.function.arguments)) : "";
-        return await (0, executables_1.executeTool)(toolCall.function.name, JSON.parse(args), cwd, this.state, this.messageHandler);
+        return await (0, executables_1.executeTool)(toolCall.function.name, JSON.parse(args), cwd, this.state, this.orchestrator, this);
     }
     updateArgumentsFromState(args) {
         let replacedArgs = args;
@@ -108,6 +179,11 @@ class PipelineHandler {
     clearPipeline() {
         this.toolCalls = [];
         this.state.clear();
+    }
+    getErrorMessage(error) {
+        if (error instanceof Error)
+            return error.message;
+        return String(error);
     }
 }
 exports.PipelineHandler = PipelineHandler;

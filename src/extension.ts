@@ -151,7 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
                         break;
                     case 'sendMessage':
                         const response = await orchestrator.handleMessage(message);
-                        panel.webview.postMessage({ command: 'receiveMessage', text: response });
+                        panel.webview.postMessage({ command: 'receiveMessage', text: response.content });
                         break;                        
                     case 'refreshProviders':
                         const providersResponse = await orchestrator.handleMessage(message);

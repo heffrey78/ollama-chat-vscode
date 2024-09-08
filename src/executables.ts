@@ -6,21 +6,24 @@ import ollama from 'ollama';
 import { Orchestrator } from './orchestrator';
 import { ollamaTools } from './config/tools';
 import { createParser } from 'llm-exe';
-import { State } from './pipelineHandler'
+import { PipelineHandler, State } from './pipelineHandler'
 import { ExecuteCommand } from './tools/executeCommand';
 import { Executable } from './tools/executable';
+import { exec } from 'child_process';
 
 export class ListFilesTopLevel implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: any): Promise<any> {
         try {
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path}`);
-            const dirPath = path.join(cwd, args.path);
+            const dirPath = path.join(args.path);
             const files = await fs.readdir(dirPath, { withFileTypes: true });
             return { files: files.map(file => file.name) };
         } catch (error) {
@@ -32,15 +35,17 @@ export class ListFilesTopLevel implements Executable {
 
 export class ListFilesRecursive implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
         try {
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path} (recursive)`);
-            const dirPath = path.join(cwd, args.path);
+            const dirPath = path.join(args.path);
             const files = await this.recursiveReadDir(dirPath);
             return { files };
         } catch (error) {
@@ -61,9 +66,11 @@ export class ListFilesRecursive implements Executable {
 
 export class ViewSourceCodeDefinitions implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
@@ -80,15 +87,17 @@ export class ViewSourceCodeDefinitions implements Executable {
 
 export class ReadFile implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
         try {
             this.orchestrator.sendUpdateToPanel(`Reading file: ${args.path}`);
-            const filePath = path.join(cwd, args.path);
+            const filePath = path.join(args.path);
             const content = await fs.readFile(filePath, 'utf-8');
             return { content };
         } catch (error) {
@@ -100,15 +109,17 @@ export class ReadFile implements Executable {
 
 export class WriteToFile implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
         try {
             this.orchestrator.sendUpdateToPanel(`Writing file: ${args.path}`);
-            const filePath = path.join(cwd, args.path);
+            const filePath = path.join(args.path);
             await fs.writeFile(filePath, args.content, 'utf-8');
             return { status: `File ${filePath} written successfully` };
         } catch (error) {
@@ -120,9 +131,11 @@ export class WriteToFile implements Executable {
 
 export class AttemptCompletion implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
@@ -141,8 +154,195 @@ export class AttemptCompletion implements Executable {
     }
 }
 
+
+export class CreateObjectives implements Executable {
+    orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
+
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
+    }
+
+    async execute(args: any, cwd: string, state: State): Promise<any> {
+        try {
+            const stepName = 'objectives'
+            const pipelinePrompt = `
+                # Ruminate on the <<USER REQUEST>> below:
+                - Create a list of <<OBJECTIVES>> describing a viable solution that will fulfill the <<USER REQUEST>>. These will later be broken down into tasks.
+
+                <<USER REQUEST>>: ${args.task}
+
+                # <<SYSTEM INFO>>:
+                - <<OS>>: ${os.platform()}
+                - <<HOME DIRECTORY>>: ${os.homedir()}
+                
+                # <<AVAILABLE TOOLS>>: 
+                ${JSON.stringify(ollamaTools)}
+
+                # CREATE OUTPUT THAT IS FORMATTED FOR MACHINE READING
+                # DO NOT PROVIDE EXPLANATION 
+                # The response will go directly into a program, so no comments are acceptable.
+                # Return ONLY the plan as a minified JSON string strictly following this example:
+
+                {
+                    "objectives": [ // <<OBJECTIVES>>
+                        {
+                            "objective": "Single word identifier for objective (e.g. 'persist_journal_entries', 'research_api_documents', etc.)
+                            "description": "Description of the objective (e.g., 'save journal entries to database', etc.)",
+                            ],
+                        }, // ... more objectives
+                    ],
+                }
+                `;
+
+            const objectivespipeLine = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
+            state.set(stepName, JSON.stringify(objectivespipeLine));
+
+            return { status: 'Completion attempted' };
+        } catch (error) {
+            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            throw error;
+        }
+    }
+}
+
+export class PlanDirectoryStructure implements Executable {
+    orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
+
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
+    }
+
+    async execute(args: any, cwd: string, state: State): Promise<any> {
+        try {
+            const stepName = 'files'
+            const pipelinePrompt = `
+                # Ruminate on the <<USER REQUEST>> and planned <<OBJECTIVES>> below:
+                - Create <<FILES>> to outline an architecture supports SOLID engineering principles.
+                - Collect all <<FILES>>, frameworks, languages, versions, and other important information as key-values in <<CONCEPTS>>.
+
+                <<USER REQUEST>>: ${args.task}
+
+                # <<SYSTEM INFO>>:
+                - <<OS>>: ${os.platform()}
+                - <<HOME DIRECTORY>>: ${os.homedir()}
+                
+                # <<AVAILABLE TOOLS>>: 
+                ${JSON.stringify(ollamaTools)}
+
+                # CREATE OUTPUT THAT IS FORMATTED FOR MACHINE READING
+                # DO NOT PROVIDE EXPLANATION 
+                # The response will go directly into a program, so no comments are acceptable.
+                # Return ONLY the plan as a minified JSON string strictly following this example:
+
+                {
+                    "file_list": [ <<FILES>>
+                                    "project_directory_name",
+                                    "project_directory_name/index.html",
+                                    "project_directory_name/src/homecontroler.ts",
+                                ],
+                }
+                `;
+
+            const filesPipeline = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
+            state.set(stepName, JSON.stringify(filesPipeline));
+
+            return { status: 'Completion attempted' };
+        } catch (error) {
+            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            throw error;
+        }
+    }
+}
+
+export class CreateTasks implements Executable {
+    orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
+
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
+    }
+
+    async execute(args: any, cwd: string, state: State): Promise<any> {
+        let response = [];
+        try {
+            const objectives = state.get('objectives');
+            if(objectives || args.task) {
+                let objectivesJson = JSON.parse(objectives || JSON.stringify([{ objective: args.task }]));
+
+                for(const objective in objectivesJson){
+                    const pipelinePrompt = `
+                    # Ruminate on the <<USER REQUEST>> below:
+                    - Use the provided <<OBJECTIVES>> that describe a viable solution that will fulfill the <<USER REQUEST>> as context.
+                    - For the given <<OBJECTIVE>> create one or more <<TASKS>> that will be followed step-by-step to complete the <<OBJECTIVE>> and ultimately the <<USER REQUEST>>. 
+                    - Each <<TASK>> must have a single, atomic <<FUNCTION>> that can be performed as an <<AVAILABLE TOOL>> such as a commandline operation (e.g. execute_command, etc.).
+                    - Each <<TASK>> must have at least one <<VALIDATING FUNCTION>>. The <<VALIDATING FUNCTION>> should verify that the previous <<FUNCTION>> succeeded.
+                    - The <<VALIDATING FUNCTION>> should execute an <<AVAILABLE TOOL>> to checking file existence, running a script, or create and execute a unit test to validate the previous <<FUNCTION>>.
+    
+                    # <<USER REQUEST>>: ${args.task}
+                    # <<OBJECTIVES>>: ${objectives}
+                    # <<OBJECTIVE>>: ${objective}
+    
+                    # <<SYSTEM INFO>>:
+                    - <<OS>>: ${os.platform()}
+                    - <<HOME DIRECTORY>>: ${os.homedir()}
+                    
+                    # <<AVAILABLE TOOLS>>: 
+                    ${JSON.stringify(ollamaTools)}
+    
+                    # CREATE OUTPUT THAT IS FORMATTED FOR MACHINE READING
+                    # DO NOT PROVIDE EXPLANATION 
+                    # The response will go directly into a program, so no comments are acceptable.
+                    # Return ONLY the plan as a minified JSON string strictly following this example:
+    
+                    {
+                        "tasks": [ // <<TASKS>>
+                                    {
+                                        "task": "Description of the objective task including validation methods", // <<TASK>>
+                                        "objective_name": "Objective related to task (e.g., 'persist_journal_entries', etc.),
+                                        "function": { // <<FUNCTION>>
+                                            "name": "Tool to accomplish task (e.g., 'execute_command', 'read_file', 'write_to_file', etc.)",
+                                            "working_directory": "Working directory for execution of the function (e.g. '', '~/', 'src/controllers', etc. )",
+                                            "arguments": { // <<ARGS>>
+                                                // Key-value pairs representing arguments specific to the tool
+                                            }
+                                        },
+                                        "validation": { // <<VALIDATING FUNCTION>>
+                                            "name": "Method to validate task completion (e.g., after 'write_to_file' task use 'read_file' to verify, etc.)",
+                                            "working_directory": "Working directory for execution of the function (e.g. '', '~/', 'src/controllers', etc. )
+                                            "arguments": { // <<ARGS>>
+                                                // Key-value pairs representing arguments specific to the tool
+                                            }
+                                        },
+                            }, // ... more tasks
+                        ],
+                    }
+                    `;
+
+
+                    const taskResponse = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
+                    response.push(taskResponse);
+                }
+            }
+
+            state.set('tasks', JSON.stringify(response));
+            return response;
+        } catch (error) {
+            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            throw error;
+        }
+    }
+}
+
+
 export class PipelineCreate implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
+
     private pipeline: {
         name: string;
         directoryName: string;
@@ -151,134 +351,40 @@ export class PipelineCreate implements Executable {
         state: Map<string, string>;
     } | null = null;
 
-    constructor(messageHandler: Orchestrator) {
+    constructor(messageHandler: Orchestrator, pipelineHandler: PipelineHandler) {
         this.orchestrator = messageHandler;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
         try {
-            const keywordsPrompt = `
-            Given the following user request, identify file names, programming concepts, or frameworks involved in this task.
-
-            User Request: ${args.task}
-
-
-                # # DO NOT EXPLAIN YOURSELF. 
-                # # Your response will go directly into a program, so do not add comments.
-                # # Return ONLY the keywords array as a JSON object following this example:
-            {
-                items: 
-                [
-                    { 
-                        "key": "language", 
-                        "value": "e.g. Python, Typescript, Java, C#, etc."  
-                    },  
-                    {    
-                        "key": "framework",    
-                        "value": "e.g. Flask, Springboot, Angular, React"  
-                    },  
-                    {    
-                        "key": "environmentManager",    
-                        "value": "e.g. venv, nvm, conda, etc."  
-                    },  
-                    {    
-                        "key": "packageManager",    
-                        "value": "e.g. pip, npm, yarn, etc."  
-                    },  
-                    {    
-                        "key": "controllerName", 
-                        "value": "e.g. userController, boardController, etc."  
-                    }, ...more key concepts, frameworks, services, etc.
-                ]
-            }   
-          `;
-
-            //const keywordsResponse = await this.messageHandler.handleToolMessage(keywordsPrompt, false);
-
             const pipelinePrompt = `
-                # Given the following user request:
-                1. Ruminate on the user request.
-                2. Plan the task architecture and create an array of key concepts that should be adhered to.
-                3. Create a plan by creating a list of objectives describing an minimum viable product that will fulfill the request
-                4. Fulfill the objectives by breaking them down into small, individually executable tasks.
-                5. Enumerate the files that will be created or modified to fulfill an objective.
-                6. Each task should have a single, atomic operation that can be performed independently as a commandline operation.
-                7. Each task should have at least one validation operation such as checking file existence, running a script, or creating and executing a unit test.
+                # Ruminate on the <<USER REQUEST>> below:
+                - In an upcoming task, you will break down the <<USER REQUEST>> in to <<OBJECTIVESS> that have <<TASKS>> that have <<FUNCTIONS>> that have <<ARGS>>.
+                - Your current task is: 
+                - 1. Write a 200 word or less brief outlining the overarching methodology used to solve the request
+                - 2. Provide a name for the project.
+                - 3. Provide a projectDirectory name.
+                - This is an automated software system. Unless asked for comment, always repond with clean, minified code, JSON, or Markdown as appropriate. 
 
-                # System Info:
-                - OS: ${os.platform()}
-                - Home directory: ${os.homedir()}
-                - cwd: ${cwd}
+                # <<SYSTEM INFO>>:
+                - <<OS>>: ${os.platform()}
+                - <<HOME DIRECTORY>>: ${os.homedir()}
                 
-                # Available tools: 
+                # <<AVAILABLE TOOLS>>: 
                 ${JSON.stringify(ollamaTools)}
 
-                User Request: ${args.task}
+                <<USER REQUEST>>: ${args.task}
 
-                # DO: USE CONSISTENT VARIABLE AND FILE NAMING ACROSS ALL TASKS.
-                # DO: EXECUTE SCRIPTS BY USING 'cd' TO FIRST NAVIGATE TO THE DESIRED DIRECTORY AND THEN EXECUTE 
                 # DO: CREATE OUTPUT THAT IS FORMATTED FOR MACHINE READING
                 # DO NOT: EXPLAIN YOURSELF. 
                 # Your response will go directly into a program, so do not add comments.
                 # Return ONLY the plan as a JSON string strictly following this example:
 
                 {
-                    "name": "Project Name",
+                    "name": "User Request Name",
                     "directoryName": "project_directory_name",
-                    "description": "A user friendly description of the project plan using markdown.",
-                    "key_concepts": [
-                        { 
-                            "key": "language", 
-                            "value": "e.g. Python, Typescript, Java, C#, etc."  
-                        },  
-                        {    
-                            "key": "framework",    
-                            "value": "e.g. Flask, Springboot, Angular, React"  
-                        },  
-                        {    
-                            "key": "environmentManager",    
-                            "value": "e.g. venv, nvm, conda, etc."  
-                        },  
-                        {    
-                            "key": "packageManager",    
-                            "value": "e.g. pip, npm, yarn, etc."  
-                        },  
-                        {    
-                            "key": "controllerName", 
-                            "value": "e.g. userController, boardController, etc."  
-                        }, ...more key concepts, frameworks, services, etc.
-                    ],
-                    "objectives": [
-                        {
-                            "objective": "Single word identifier for objective (e.g. 'persist_journal_entries', 'research_api_documents', etc.)
-                            "description": "Description of the objective (e.g., 'save journal entries to database', etc.)",
-                            "file_list": [
-                                "{cwd}/{project_directory_name}",
-                                "{cwd}/{project_directory_name}/index.html",
-                                "{cwd}/{project_directory_name}/src/homecontroler.ts",
-                            ],
-                        }, ... more objectives
-                    ],
-                    "tasks": [
-                                {
-                                    "task": "Description of the objective task including validation methods",
-                                    "objective": "Objective related to task (e.g., 'persist_journal_entries', etc.),
-                                    "function": {
-                                        "name": "Tool to accomplish task (e.g., 'execute_command', 'read_file', 'write_to_file', etc.)",
-                                        "working_directory": "Working directory for execution of the function (e.g. '', '~/', 'src/controllers', etc. )",
-                                        "arguments": {
-                                            // Key/value pairs representing arguments specific to the tool
-                                        }
-                                    },
-                                    "function": {
-                                        "name": "Method to validate task completion (e.g., after 'write_to_file' task use 'read_file' to verify, etc.)",
-                                        "working_directory": "Working directory for execution of the function (e.g. '', '~/', 'src/controllers', etc. )
-                                        "arguments": {
-                                            // Key/value pairs representing arguments specific to the tool
-                                        }
-                                    },
-                        }, ... more tasks
-                    ],
+                    "brief": "A user friendly description of the project plan using markdown.",
                 }
             `;
 
@@ -288,39 +394,12 @@ export class PipelineCreate implements Executable {
             let errorMessage: string = "";
             this.orchestrator.sendUpdateToPanel("Attempting to create plan.");
 
-            while (retryCount < maxRetries) {
-                try {
-                    const failureReply: string = retryCount > 0 ? `Attempt #${retryCount + 1} \n Error from JSON.parse when trying to parse previous response: ${errorMessage}` : ""
-                    const message = {command: 'sendMessage', text: pipelinePrompt + failureReply, tool_use: false};
-                    const response = await this.orchestrator.handleMessage(message);
-                    this.orchestrator.sendUpdateToPanel(`Plan creation attempt ${retryCount + 1}: ${JSON.stringify(response)}`);
-                    const trimmedResponse = this.tryParseJson(message.text);
-                    planJson = trimmedResponse.json;
+            const preplan = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
+            const files = await executeTool('plan_directory_structure', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
+            const objectives = await executeTool('create_objectives', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
+            const tasks = await executeTool('create_tasks', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
 
-                    this.orchestrator.sendUpdateToPanel(`Plan JSON: ${JSON.stringify(planJson)}`);
-
-                    // If we reach this point, the response is valid JSON, so break out of the loop.
-                    break;
-                } catch (error) {
-                    if (error instanceof SyntaxError) {
-                        errorMessage = error.message;
-                    }
-
-                    if (!(error instanceof SyntaxError)) {
-                        // If the error is not due to invalid JSON, rethrow it.        
-                        throw error;
-                    }
-
-                    retryCount++;
-
-                    if (retryCount === maxRetries) {
-                        throw new Error(`Failed to receive valid JSON after ${maxRetries} retries.`);
-                    }
-
-                    // Wait for a short duration before retrying to avoid overwhelming the server.
-                    await new Promise((resolve) => setTimeout(resolve, 500));
-                }
-            }
+            let parsedTasks = this.tryParseJson(objectives);
 
             this.parsePipeline(JSON.stringify(planJson));
 
@@ -343,6 +422,7 @@ export class PipelineCreate implements Executable {
         if (!jsonRegex.test(trimmedResponse)) {
             // Remove non-JSON content from the beginning and end of the string
             trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
+            trimmedResponse = trimmedResponse.replace(/\}\s+$/, '}');
         }
 
         try {
@@ -379,9 +459,11 @@ export class PipelineCreate implements Executable {
 
 export class Chat implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
@@ -397,9 +479,11 @@ export class Chat implements Executable {
 
 export class EnsureProjectFolder implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
@@ -422,20 +506,28 @@ export class EnsureProjectFolder implements Executable {
     }
 }
 
-export const createTools = (messageHandler: Orchestrator): { [key: string]: Executable } => ({
-    execute_command: new ExecuteCommand(messageHandler),
-    list_files_top_level: new ListFilesTopLevel(messageHandler),
-    list_files_recursive: new ListFilesRecursive(messageHandler),
-    view_source_code_definitions_top_level: new ViewSourceCodeDefinitions(messageHandler),
-    read_file: new ReadFile(messageHandler),
-    write_to_file: new WriteToFile(messageHandler),
-    attempt_completion: new AttemptCompletion(messageHandler),
-    planner: new PipelineCreate(messageHandler),
-    chat: new Chat(messageHandler),
-    project_folder: new EnsureProjectFolder(messageHandler),
+export const createTools = (messageHandler: Orchestrator, pipelineHandler: PipelineHandler): { [key: string]: Executable } => ({
+    execute_command: new ExecuteCommand(messageHandler, pipelineHandler),
+    list_files_top_level: new ListFilesTopLevel(messageHandler, pipelineHandler),
+    list_files_recursive: new ListFilesRecursive(messageHandler, pipelineHandler),
+    view_source_code_definitions_top_level: new ViewSourceCodeDefinitions(messageHandler, pipelineHandler),
+    read_file: new ReadFile(messageHandler, pipelineHandler),
+    write_to_file: new WriteToFile(messageHandler, pipelineHandler),
+    attempt_completion: new AttemptCompletion(messageHandler, pipelineHandler),
+    planner: new PipelineCreate(messageHandler, pipelineHandler),
+    chat: new Chat(messageHandler, pipelineHandler),
+    project_folder: new EnsureProjectFolder(messageHandler, pipelineHandler),
+    create_objectives: new CreateObjectives(messageHandler, pipelineHandler),
+    create_tasks: new CreateTasks(messageHandler, pipelineHandler),
+    plan_directory_structure: new PlanDirectoryStructure(messageHandler, pipelineHandler),
 });
 
-export async function executeTool(name: string, args: any, cwd: string, state: any, messageHandler: Orchestrator): Promise<any> {
+export async function executeTool(name: string, 
+    args: any, 
+    cwd: string, 
+    state: any, 
+    orchestrator: Orchestrator, 
+    pipelineHandler: PipelineHandler): Promise<any> {
     // Trim the name of special characters
     const trimmedName = name.replace(/[^\w\s-]/g, '').trim();
 
@@ -452,7 +544,7 @@ export async function executeTool(name: string, args: any, cwd: string, state: a
         return acc;
     }, {} as any);
 
-    const toolHandlers = createTools(messageHandler);
+    const toolHandlers = createTools(orchestrator, pipelineHandler);
     const handler = toolHandlers[trimmedName];
     if (handler) {
         try {

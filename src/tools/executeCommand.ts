@@ -4,14 +4,17 @@ import { promisify } from 'util';
 import vscode from 'vscode';
 import { Orchestrator } from '../orchestrator';
 import { Executable } from './executable';
-import { State } from '../pipelineHandler';
+import { State, PipelineHandler } from '../pipelineHandler';
 
 export class ExecuteCommand implements Executable {
     orchestrator: Orchestrator;
+    pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
+        this.pipelineHandler = pipelineHandler;
     }
+
 
     async execute(args: any, cwd: string, state: State): Promise<any> {
         const permissionQuestion = `Do you want to execute the following command on ${os.platform()}?\n${args.command}\n\nReply with 'YES' to proceed.`;

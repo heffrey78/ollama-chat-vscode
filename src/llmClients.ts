@@ -29,8 +29,12 @@ export class OllamaClient implements LlmClient {
         if (params.stream === true) {
             throw new Error("Streaming is not supported in this implementation");
         }
-        return this.ollama.chat({
-            ...params,
+
+        let chatRequest: ChatRequest = params.tools ?
+            { model: params.model, messages: params.messages, stream: false, tools: params.tools } :
+            { model: params.model, messages: params.messages, stream: false };
+        return await this.ollama.chat({
+            ...chatRequest,
             stream: false
         });
     }
@@ -50,9 +54,9 @@ export class OllamaClient implements LlmClient {
     }
 
     async setModels() {
-        if(!this.models){
+        if (!this.models) {
             this.models = await this.getModels();
-        }  
+        }
     }
 }
 

@@ -135,23 +135,6 @@ exports.ollamaTools = [
     {
         type: 'function',
         function: {
-            name: 'ask_followup_question',
-            description: 'Ask the user a question to gather additional information.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    question: {
-                        type: 'string',
-                        description: 'The question to ask the user.'
-                    }
-                },
-                required: ['question']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
             name: 'attempt_completion',
             description: 'Present the result of a task to the user.',
             parameters: {
@@ -203,6 +186,57 @@ exports.ollamaTools = [
                 required: ['projectName']
             }
         }
-    }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'create_objectives',
+            description: 'Given a user request, returns an array of objectives that will be used to organize its completion.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    request: {
+                        type: 'string',
+                        description: 'The user request'
+                    }
+                },
+                required: ['request']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'create_tasks',
+            description: 'Given an objective, returns tasks that will be used to complete the objective',
+            parameters: {
+                type: 'object',
+                properties: {
+                    objective: {
+                        type: 'string',
+                        description: 'The objective to fulfill'
+                    }
+                },
+                required: ['request']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'plan_directory_structure',
+            description: 'Given a user request, returns a file architecture that will be used to complete the objective',
+            parameters: {
+                type: 'object',
+                properties: {
+                    objective: {
+                        type: 'string',
+                        description: 'The objective to fulfill'
+                    }
+                },
+                required: ['request']
+            }
+        }
+    },
 ];
 //# sourceMappingURL=tools.js.map
