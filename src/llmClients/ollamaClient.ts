@@ -51,23 +51,13 @@ export class OllamaClient implements LlmClient {
 
                 // Check for the specific error message
                 if (errorMessage && errorMessage.includes("Unable to determine the device handle for GPU")) {
-                    const shouldRestart = await vscode.window.showInputBox({
-                        prompt: 'Ollama service encountered a GPU error. Would you like to restart the service?',
-                        placeHolder: 'Yes or No',
-                        ignoreFocusOut: true
-                    });
-
-                    if (shouldRestart === 'Yes') {
-                        await this.restartOllamaService();
-                        // Wait for a moment to allow the service to restart
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                        continue; // Retry the request after restarting
-                    }
+                    await this.tryRestart();
                 }
 
                 retryCount++;
 
                 if (retryCount === maxRetries) {
+                    await this.tryRestart();
                     throw new Error(`Failed to receive valid JSON after ${maxRetries} retries.`);
                 }
                 // Wait for a short duration before retrying to avoid overwhelming the server.
@@ -96,6 +86,20 @@ export class OllamaClient implements LlmClient {
         } catch (error) {
             console.error('Error in Ollama generate:', error);
             throw error;
+        }
+    }
+
+    async tryRestart() {
+        const shouldRestart = await vscode.window.showInputBox({
+            prompt: 'Ollama service encountered a GPU error. Would you like to restart the service?',
+            placeHolder: 'Yes or No',
+            ignoreFocusOut: true
+        });
+
+        if (shouldRestart === 'Yes') {
+            await this.restartOllamaService();
+            // Wait for a moment to allow the service to restart
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
     }
 
@@ -168,7 +172,7 @@ export class OllamaClient implements LlmClient {
         return {
             model: this.model,
             messages: ollamaMessages,
-            stream: false
+            stream: false,
         };
     }
 
@@ -192,8 +196,6 @@ export class OllamaClient implements LlmClient {
             done_reason: response.done_reason, // Include done_reason
         };
     }
-
-    // Update this function to handle the actual structure of Ollama's ToolCall
 
     private transformToOllamaToolCalls(toolCalls?: OllamaToolCall[]): ToolCall[] {
         if (!toolCalls) return [];

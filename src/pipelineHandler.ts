@@ -3,7 +3,7 @@ import * as uuid from "uuid";
 import { executeTool } from './tools/executables';
 import { Orchestrator } from "./orchestrator";
 import { logger } from './logger';
-import { ChatRequest } from "./chats/chatRequest";
+import { Message } from "./messages/message";
 
 export interface Objective {
   objective: string;
@@ -78,7 +78,7 @@ export class PipelineHandler {
     while (retryCount < maxRetries) {
       try {
         const failureReply: string = retryCount > 0 ? `Attempt #${retryCount + 1}. Error from JSON.parse when trying to parse previous response: ${errorMessage}` : ""
-        const pipelineMessage = { command: 'sendMessage', text: pipelinePrompt + failureReply, tool_use: false };
+        const pipelineMessage: Message = { role: 'system', command: 'sendMessage', content: pipelinePrompt + failureReply, tool_use: false };
         logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
         const pipelineResponse = await this.orchestrator.handleMessage(pipelineMessage);
         const trimmedResponse = await this.tryParseJson(pipelineResponse.content);

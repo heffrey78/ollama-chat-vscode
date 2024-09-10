@@ -76,7 +76,7 @@ class PipelineHandler {
         while (retryCount < maxRetries) {
             try {
                 const failureReply = retryCount > 0 ? `Attempt #${retryCount + 1}. Error from JSON.parse when trying to parse previous response: ${errorMessage}` : "";
-                const pipelineMessage = { command: 'sendMessage', text: pipelinePrompt + failureReply, tool_use: false };
+                const pipelineMessage = { role: 'system', command: 'sendMessage', content: pipelinePrompt + failureReply, tool_use: false };
                 logger_1.logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
                 const pipelineResponse = await this.orchestrator.handleMessage(pipelineMessage);
                 const trimmedResponse = await this.tryParseJson(pipelineResponse.content);

@@ -3,8 +3,7 @@ import { PipelineHandler } from './pipelineHandler';
 import { ollamaTools } from './config/tools';
 import { systemMessage } from './config/systemMessage';
 import { createLlmClient } from './llmClients';
-import { Message } from './messages/Message';
-import { GenerateResponse } from './chats/generateResponse';
+import { Message } from './messages/message';
 import { GenerateRequest } from './chats/generateRequest';
 import { ChatRequest } from './chats/chatRequest';
 import { LlmClient } from './llmClients/llmClient';
@@ -30,30 +29,34 @@ export class Orchestrator {
         logger.info('Orchestrator initialized');
     }
 
-    public async handleMessage(message: any): Promise<Message> {
+    public async handleMessage(message: Message): Promise<Message> {
         logger.info(`Handling message: ${message.command}`);
         switch (message.command) {
-            case 'sendMessage':
-                let response = await this.executeLlmChatRequest(message.text, message.tool_use);
+            case 'sendMessage': {
+                const response = await this.executeLlmChatRequest(message.content, message.tool_calls && message.tool_calls.length > 0);
                 return response;
-            case 'generate':
-                let generationResponse = await this.executeLlmChatRequest(message.text, message.tool_use);
+            }
+            case 'generate': {
+                const generationResponse = await this.executeLlmGenerateRequest(message.content);
                 return generationResponse;
+            }
             case 'setModel':
-                await this.setModel(message.model);
+                await this.setModel(message.model || "");
                 return { role: 'assistant', content: 'model set' };
             case 'setProvider':
-                await this.setModelProvider(message.provider);
+                await this.setModelProvider(message.provider || "");
                 return { role: 'assistant', content: 'provider set' };
-            case 'refreshProviders':
+            case 'refreshProviders': {
                 const providersResponse = this.getProviderList();
                 const providerList = JSON.stringify(providersResponse);
-                return { role: 'assistant', content: providerList };
-            case 'refreshModels':
+                return { role: 'system', content: providerList };
+            }
+            case 'refreshModels': {
                 const provider = await this.getModelProvider();
                 const modelResponse = await this.getModelsByProvider(provider);
                 const modelList = JSON.stringify(modelResponse);
-                return { role: 'assistant', content: modelList };
+                return { role: 'system', content: modelList };
+            }
             case 'executePipeline':
                 return await this.executePipelines();
             default:
@@ -62,11 +65,11 @@ export class Orchestrator {
         }
     }
 
-    private async executeLlmChatRequest(text: string, tool_use: boolean = false): Promise<Message> {
+    private async executeLlmChatRequest(content: string, tool_use: boolean = false): Promise<Message> {
         try {
-            logger.info(`Executing LLM chat request: ${text.substring(0, 50)}...`);
+            logger.info(`Executing LLM chat request: ${content.substring(0, 50)}...`);
             const modelName = this.llmClient.model;
-            const newMessage: Message = { role: 'user', content: text };
+            const newMessage: Message = { role: 'user', content: content };
             this.messages.push(newMessage);
             const request: ChatRequest = { model: modelName, messages: this.messages, stream: false };
 
@@ -98,18 +101,18 @@ export class Orchestrator {
     }
 
     // Experiment with generate over chat
-    private async executeLlmGenerateRequest(text: string, tool_use: boolean = false): Promise<Message> {
+    private async executeLlmGenerateRequest(content: string): Promise<Message> {
         try {
-            logger.info(`Executing LLM generate request: ${text.substring(0, 50)}...`);
+            logger.info(`Executing LLM generate request: ${content.substring(0, 50)}...`);
             const modelName = this.llmClient.model;
-            const newMessage: Message = { role: 'user', content: text };
+            const newMessage: Message = { role: 'user', content: content };
             this.messages.push(newMessage);
-            let request: GenerateRequest = { model: modelName, prompt: text, system: systemMessage.content, stream: false, format: "json" };
+            const request: GenerateRequest = { model: modelName, prompt: content, system: systemMessage.content, stream: false, format: "json" };
 
             const response = await this.llmClient.generate(request);
 
             if (response) {
-                let replyMessage = { role: 'assistant', content: response.response };
+                const replyMessage = { role: 'assistant', content: response.response };
                 this.messages.push(replyMessage);
                 logger.info(`LLM generate request completed successfully`);
                 return replyMessage;
@@ -149,14 +152,14 @@ export class Orchestrator {
         return this.llmClient.provider;
     }
 
-    public sendUpdateToPanel(message: any) {
-        logger.info(`Sending update to panel: ${JSON.stringify(message).substring(0, 100)}...`);
-        this.panel.webview.postMessage({ command: 'receiveMessage', text: message });
+    public sendUpdateToPanel(updateText: string) {
+        logger.info(`Sending update to panel: ${JSON.stringify(updateText).substring(0, 100)}...`);
+        this.panel.webview.postMessage({ command: 'receiveMessage', content: updateText });
     }
 
-    public sendErrorToPanel(errorMessage: string) {
-        logger.error(`Sending error to panel: ${errorMessage}`);
-        this.panel.webview.postMessage({ command: 'receiveMessage', text: errorMessage });
+    public sendErrorToPanel(errorText: string) {
+        logger.error(`Sending error to panel: ${errorText}`);
+        this.panel.webview.postMessage({ command: 'receiveMessage', content: errorText });
     }
 
     private async initializeLlmClient(provider: string = "ollama"): Promise<void> {
@@ -192,7 +195,7 @@ export class Orchestrator {
     }
 
     private getProviderList(): string[] {
-        const providers = ['ollama', 'claude', 'openai'];
+        const providers = ['ollama', 'ollama-cli', 'claude', 'openai'];
         logger.info(`Provider list: ${providers.join(', ')}`);
         return providers;
     }
@@ -208,7 +211,7 @@ export class Orchestrator {
         return models;
     }
 
-    private createPipeline(toolCalls: any[]) {
+    private createPipeline(toolCalls: ToolCall[]) {
         logger.info(`Creating new pipeline from tool calls: ${JSON.stringify(toolCalls)}`);
         this.pipelineHandler.createPipeline(toolCalls);
     }

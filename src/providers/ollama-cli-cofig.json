@@ -1,0 +1,11 @@
+{
+    "name": "ollama-cli",
+    "url": "http://localhost:14434",
+    "apiType": "Ollama",
+    "capabilities": [
+      "text",
+      "tool",
+      "embedding"
+    ],
+    "defaultModel": "mistral"
+  }

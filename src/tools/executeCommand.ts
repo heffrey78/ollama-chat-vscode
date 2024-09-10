@@ -3,7 +3,7 @@ import * as child_process from 'child_process';
 import { promisify } from 'util';
 import vscode from 'vscode';
 import { Orchestrator } from '../orchestrator';
-import { Executable } from './executable';
+import { Executable, ExecutableArgs, ExecutableReturn } from './executable';
 import { State, PipelineHandler } from '../pipelineHandler';
 
 export class ExecuteCommand implements Executable {
@@ -16,9 +16,12 @@ export class ExecuteCommand implements Executable {
     }
 
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         const permissionQuestion = `Do you want to execute the following command on ${os.platform()}?\n${args.command}\n\nReply with 'YES' to proceed.`;
         let permissionResult: any = {};
+        if(!args.command) {
+            throw new Error(`Executable command missing`);
+        }
 
         // Get the user's answer using a modal dialog
         permissionResult = await vscode.window.showInputBox({
@@ -43,7 +46,7 @@ export class ExecuteCommand implements Executable {
                     this.orchestrator.sendUpdateToPanel(`Command error: ${stderr}`);
                 }
 
-                return { result: stdout, error: stderr };
+                return { results: [stdout], error: stderr };
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -51,7 +54,7 @@ export class ExecuteCommand implements Executable {
                 throw error;
             }
         } else {
-            return { result: 'Command execution cancelled by user.' };
+            return { results: ['Command execution cancelled by user.'] };
         }
     }
 }

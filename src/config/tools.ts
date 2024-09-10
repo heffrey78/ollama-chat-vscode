@@ -156,12 +156,12 @@ export const ollamaTools: Tool[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    projectName: {
+                    path: {
                         type: 'string',
-                        description: 'The name of the project folder to check or create.'
+                        description: 'The path of the project folder to check or create.'
                     }
                 },
-                required: ['projectName']
+                required: ['path']
             }
         }
     },

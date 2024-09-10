@@ -2,15 +2,15 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import ollama from 'ollama';
 import { Orchestrator } from '../orchestrator';
 import { ollamaTools } from '../config/tools';
 import { createParser } from 'llm-exe';
-import { PipelineHandler, State } from '../pipelineHandler'
+import { Pipeline, PipelineHandler, State } from '../pipelineHandler'
 import { ExecuteCommand } from './executeCommand';
-import { Executable } from './executable';
-import { exec } from 'child_process';
+import { Executable, ExecutableArgs, ExecutableReturn } from './executable';
 import { logger } from '../logger';
+import { Message } from '../messages/message';
+
 
 export class ListFilesTopLevel implements Executable {
     orchestrator: Orchestrator;
@@ -21,11 +21,11 @@ export class ListFilesTopLevel implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info(`Listing files in: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path}`);
-            const dirPath = path.join(args.path);
+            const dirPath = path.join(args.path || os.homedir.toString());
             const files = await fs.readdir(dirPath, { withFileTypes: true });
             logger.info(`Successfully listed ${files.length} files`);
             return { files: files.map(file => file.name) };
@@ -46,11 +46,11 @@ export class ListFilesRecursive implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info(`Listing files in: ${args.path} (recursive)`);
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path} (recursive)`);
-            const dirPath = path.join(args.path);
+            const dirPath = path.join(args.path || os.homedir.toString());
             const files = await this.recursiveReadDir(dirPath);
             logger.info(`Successfully listed ${files.length} files recursively`);
             return { files };
@@ -80,13 +80,13 @@ export class ViewSourceCodeDefinitions implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info('Viewing source code definitions');
             this.orchestrator.sendUpdateToPanel(`Viewing source code.`);
             // Implement source code parsing logic
             logger.info('Source code definitions viewed successfully');
-            return { definitions: [`class MyClass`, `function myFunction()`] };
+            return { results: [`class MyClass`, `function myFunction()`] };
         } catch (error) {
             logger.error(`Error viewing source code definitions: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error viewing source code definitions: ${getErrorMessage(error)}`);
@@ -104,14 +104,14 @@ export class ReadFile implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info(`Reading file: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Reading file: ${args.path}`);
-            const filePath = path.join(args.path);
+            const filePath = path.join(args.path || os.homedir.toString());
             const content = await fs.readFile(filePath, 'utf-8');
             logger.info(`File ${args.path} read successfully`);
-            return { content };
+            return { results: [content] };
         } catch (error) {
             logger.error(`Error reading file: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error reading file: ${getErrorMessage(error)}`);
@@ -129,14 +129,14 @@ export class WriteToFile implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info(`Writing file: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Writing file: ${args.path}`);
-            const filePath = path.join(args.path);
-            await fs.writeFile(filePath, args.content, 'utf-8');
+            const filePath = path.join(args.path || os.homedir.toString());
+            await fs.writeFile(filePath, args.message.content, 'utf-8');
             logger.info(`File ${filePath} written successfully`);
-            return { status: `File ${filePath} written successfully` };
+            return { results: [`File ${filePath} written successfully`] };
         } catch (error) {
             logger.error(`Error writing to file: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error writing to file: ${getErrorMessage(error)}`);
@@ -154,10 +154,10 @@ export class AttemptCompletion implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info('Attempting completion');
-            vscode.window.showInformationMessage(args.result);
+            vscode.window.showInformationMessage(args.task || "");
             if (args.command) {
                 logger.info(`Executing command: ${args.command}`);
                 this.orchestrator.sendUpdateToPanel(`Attempted completion`);
@@ -165,7 +165,7 @@ export class AttemptCompletion implements Executable {
                 // Implement command execution logic here
             }
             logger.info('Completion attempted successfully');
-            return { status: 'Completion attempted' };
+            return { results: ['Completion attempted'] };
         } catch (error) {
             logger.error(`Error attempting completion: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
@@ -183,7 +183,7 @@ export class CreateObjectives implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info('Creating objectives');
             const stepName = 'objectives'
@@ -220,7 +220,7 @@ export class CreateObjectives implements Executable {
             state.set(stepName, JSON.stringify(objectivespipeLine));
 
             logger.info('Objectives created successfully');
-            return { status: 'Completion attempted' };
+            return { results: ['Completion attempted'] };
         } catch (error) {
             logger.error(`Error creating objectives: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error creating objectives: ${getErrorMessage(error)}`);
@@ -238,7 +238,7 @@ export class PlanDirectoryStructure implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info('Planning directory structure');
             const stepName = 'files'
@@ -274,7 +274,7 @@ export class PlanDirectoryStructure implements Executable {
             state.set(stepName, JSON.stringify(filesPipeline));
 
             logger.info('Directory structure planned successfully');
-            return { status: 'Completion attempted' };
+            return { results: ['Completion attempted'] };
         } catch (error) {
             logger.error(`Error planning directory structure: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error planning directory structure: ${getErrorMessage(error)}`);
@@ -292,7 +292,7 @@ export class CreateTasks implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         const response = [];
         try {
             logger.info('Creating tasks');
@@ -356,7 +356,7 @@ export class CreateTasks implements Executable {
 
             state.set('tasks', JSON.stringify(response));
             logger.info('Tasks created successfully');
-            return response;
+            return { results: response };
         } catch (error) {
             logger.error(`Error creating tasks: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error creating tasks: ${getErrorMessage(error)}`);
@@ -369,20 +369,17 @@ export class PipelineCreate implements Executable {
     orchestrator: Orchestrator;
     pipelineHandler: PipelineHandler;
 
-    private pipeline: {
-        name: string;
-        directoryName: string;
-        objectives: string[];
-        tasks: any[];
-        state: Map<string, string>;
-    } | null = null;
-
     constructor(messageHandler: Orchestrator, pipelineHandler: PipelineHandler) {
         this.orchestrator = messageHandler;
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
+
+        if(!args.task) {
+            throw new Error('No task.');
+        }
+
         try {
             logger.info('Creating pipeline');
             const pipelinePrompt = `
@@ -415,24 +412,26 @@ export class PipelineCreate implements Executable {
                 }
             `;
 
-            const maxRetries = 3;
-            let retryCount = 0;
-            let planJson = {};
-            let errorMessage: string = "";
+            // const maxRetries = 3;
+            // let retryCount = 0;
+            const planJson = {};
+            // let errorMessage: string = "";
             this.orchestrator.sendUpdateToPanel("Attempting to create plan.");
 
+            const taskMessage: Message = {role: 'system', content: args.task, };
+
             const preplan = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
-            const files = await executeTool('plan_directory_structure', args.task, state, this.orchestrator, this.pipelineHandler);
-            const objectives = await executeTool('create_objectives', args.task, state, this.orchestrator, this.pipelineHandler);
-            const tasks = await executeTool('create_tasks', args.task, state, this.orchestrator, this.pipelineHandler);
+            const files = await executeTool('plan_directory_structure', taskMessage, state, this.orchestrator, this.pipelineHandler);
+            const objectives = await executeTool('create_objectives', taskMessage, state, this.orchestrator, this.pipelineHandler);
+            const tasks = await executeTool('create_tasks', taskMessage, state, this.orchestrator, this.pipelineHandler);
 
-            let parsedTasks = this.tryParseJson(objectives);
+            const parsedTasks = this.tryParseJson(objectives);
 
-            this.parsePipeline(JSON.stringify(planJson));
+            const pipeline = this.parsePipeline(JSON.stringify(planJson));
 
-            if (this.pipeline) {
+            if (pipeline) {
                 logger.info('Pipeline created successfully');
-                return this.pipeline; // Return the entire plan object
+                return { pipeline: pipeline }; 
             } else {
                 logger.error('Failed to parse plan');
                 throw new Error('Failed to parse plan');
@@ -463,13 +462,13 @@ export class PipelineCreate implements Executable {
         }
     }
 
-    private parsePipeline(pipelineString: string,) {
+    private parsePipeline(pipelineString: string,): Pipeline {
         const parser = createParser('json');
         if (pipelineString.length > 0) {
             const parsedPipeline = parser.parse(pipelineString);
             logger.info(`Parsed pipeline: ${JSON.stringify(parsedPipeline)}`);
 
-            this.pipeline = {
+            return {
                 name: parsedPipeline.name,
                 directoryName: parsedPipeline.directoryName,
                 objectives: parsedPipeline.objectives,
@@ -478,11 +477,8 @@ export class PipelineCreate implements Executable {
             };
         } else {
             logger.error('Failed to parse pipeline');
+            throw new Error('Failed to parse pipeline');
         }
-    }
-
-    public getPipeline() {
-        return this.pipeline;
     }
 }
 
@@ -495,12 +491,13 @@ export class Chat implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
             logger.info(`Executing chat with message: ${args.message}`);
-            const response = await this.orchestrator.handleMessage( { command: 'sendMessage', message: args.message });
+            args.message.command = 'sendMessage';
+            const response = await this.orchestrator.handleMessage( args.message );
             logger.info('Chat executed successfully');
-            return { response: response };
+            return {message: response};
         } catch (error) {
             logger.error(`Error calling ollama.chat: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error calling ollama.chat: ${getErrorMessage(error)}`);
@@ -518,20 +515,20 @@ export class EnsureProjectFolder implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, state: State): Promise<any> {
+    async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         try {
-            logger.info(`Checking project folder: ${args.projectName}`);
-            this.orchestrator.sendUpdateToPanel(`Checking project folder: ${args.projectName}`);
-            const projectPath = path.join(args.projectName);
+            logger.info(`Checking project folder: ${args.path}`);
+            this.orchestrator.sendUpdateToPanel(`Checking project folder: ${args.path}`);
+            const projectPath = path.join(args.path || os.homedir.toString());
             
             try {
                 await fs.access(projectPath);
-                logger.info(`Project folder ${args.projectName} already exists`);
-                return { status: `Project folder ${args.projectName} already exists` };
+                logger.info(`Project folder ${args.path} already exists`);
+                return { results: [`Project folder ${args.path} already exists`] };
             } catch (error) {
                 await fs.mkdir(projectPath, { recursive: true });
-                logger.info(`Project folder ${args.projectName} created successfully`);
-                return { status: `Project folder ${args.projectName} created successfully` };
+                logger.info(`Project folder ${args.path} created successfully`);
+                return { results: [`Project folder ${args.path} created successfully`] };
             }
         } catch (error) {
             logger.error(`Error handling project folder: ${getErrorMessage(error)}`);
@@ -558,7 +555,7 @@ export const createTools = (messageHandler: Orchestrator, pipelineHandler: Pipel
 });
 
 export async function executeTool(name: string, 
-    args: any, 
+    args: Message, 
     state: any, 
     orchestrator: Orchestrator, 
     pipelineHandler: PipelineHandler): Promise<any> {
@@ -592,7 +589,8 @@ export async function executeTool(name: string,
         }
     } else {
         logger.warn(`No handler found for tool ${name}, falling back to chat`);
-        return await toolHandlers['chat'].execute({ message: `${trimmedName}: ${JSON.stringify(trimmedArgs)}` }, state);
+        const executableArgs: ExecutableArgs = { message: {role: 'user', content: trimmedArgs}};
+        return await toolHandlers['chat'].execute(executableArgs, state);
     }
 }
 

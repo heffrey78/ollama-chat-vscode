@@ -6,6 +6,7 @@ import { OpenAIClient } from './llmClients/openAiClient';
 import { ClaudeClient } from './llmClients/claudeClient';
 import { DynamicLlmClient } from './llmClients/dynamicClient';
 import { OllamaClient } from './llmClients/ollamaClient';
+import { OllamaClitClient as OllamaCliClient } from './llmClients/ollamaCliClient';
 
 export async function loadProviders(): Promise<Map<string, LlmClient>> {
     const providersDir = path.join(__dirname, 'providers');
@@ -18,6 +19,9 @@ export async function loadProviders(): Promise<Map<string, LlmClient>> {
             switch (config.name) {
                 case 'ollama':
                     providers.set(config.name, new OllamaClient(config));
+                    break;
+                case 'ollama-cli':
+                    providers.set(config.name, new OllamaCliClient(config));
                     break;
                 case 'openai':
                     providers.set(config.name, new OpenAIClient(config));

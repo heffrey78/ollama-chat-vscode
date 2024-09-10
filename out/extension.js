@@ -52,6 +52,7 @@ function getWebviewContent() {
     <body>
         <select id="provider-select">
             <option value="ollama">Ollama</option>
+            <option value="ollama-cli">Ollama CLI Client</option>
             <option value="claude">Claude</option>
             <option value="openai">OpenAI</option>
         </select>
@@ -92,7 +93,7 @@ function getWebviewContent() {
                 const message = messageInput.value.trim();
                 if (message) {
                     addMessage(message, true);
-                    vscode.postMessage({ command: 'sendMessage', text: message });
+                    vscode.postMessage({ command: 'sendMessage', content: message });
                     messageInput.value = '';
                 }
             });
@@ -167,15 +168,15 @@ function activate(context) {
             switch (message.command) {
                 case 'exportChat':
                     await orchestrator.exportChatHistory();
-                    panel.webview.postMessage({ command: 'chatExported', text: 'Chat exported' });
+                    panel.webview.postMessage({ command: 'chatExported', content: 'Chat exported' });
                     break;
                 case 'clearChat':
                     await orchestrator.clearChatHistory();
-                    panel.webview.postMessage({ command: 'chatCleared', text: 'Chat cleared' });
+                    panel.webview.postMessage({ command: 'chatCleared', content: 'Chat cleared' });
                     break;
                 case 'sendMessage': {
                     const response = await orchestrator.handleMessage(message);
-                    panel.webview.postMessage({ command: 'receiveMessage', text: response.content });
+                    panel.webview.postMessage({ command: 'receiveMessage', content: response.content });
                     break;
                 }
                 case 'refreshProviders': {
