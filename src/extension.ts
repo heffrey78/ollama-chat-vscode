@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import { Orchestrator } from './orchestrator';
+import path from 'path';
+import fs from 'fs';
+import { ProviderConfig } from './config/providerConfig';
 
 function getWebviewContent() {
-    
+
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -35,6 +38,7 @@ function getWebviewContent() {
         <div id="button-container">
             <button id="export-button">Export Chat</button>
             <button id="clear-button">Clear Chat</button>
+            <button id="add-provider-button">Add Provider</button>
         </div>
         <script>
             const vscode = acquireVsCodeApi();
@@ -45,6 +49,11 @@ function getWebviewContent() {
             const modelSelect = document.getElementById('model-select');
             const exportButton = document.getElementById('export-button');
             const clearButton = document.getElementById('clear-button');
+
+            const addProviderButton = document.getElementById('add-provider-button');
+            addProviderButton.addEventListener('click', () => {
+                vscode.postMessage({ command: 'addProvider' });
+            });
 
             function addMessage(text, isUser = false) {
                 const messageElement = document.createElement('p');
@@ -121,7 +130,7 @@ function getWebviewContent() {
 export function activate(context: vscode.ExtensionContext) {
     console.log('LLM Chat extension is now active!');
 
-    let disposable = vscode.commands.registerCommand('ollama-chat-vscode.startChat', async () => {
+    const disposable = vscode.commands.registerCommand('ollama-chat-vscode.startChat', async () => {
         const panel = vscode.window.createWebviewPanel(
             'llmChat',
             'LLM Chat',
@@ -149,33 +158,41 @@ export function activate(context: vscode.ExtensionContext) {
                         await orchestrator.clearChatHistory();
                         panel.webview.postMessage({ command: 'chatCleared', text: 'Chat cleared' });
                         break;
-                    case 'sendMessage':
+                    case 'sendMessage': {
                         const response = await orchestrator.handleMessage(message);
                         panel.webview.postMessage({ command: 'receiveMessage', text: response.content });
-                        break;                        
-                    case 'refreshProviders':
+                        break;
+                    }
+                    case 'refreshProviders': {
                         const providersResponse = await orchestrator.handleMessage(message);
                         const providers = JSON.parse(providersResponse.content);
                         panel.webview.postMessage({ command: 'updateProviders', providers: providers });
-                        break;  
-                    case 'refreshModels':
-                        const modelsResponse = await orchestrator.handleMessage(message);
+                        break;
+                    }
+                    case 'refreshModels': {
+                        const modelsResponse =
+                            await orchestrator.handleMessage(message);
                         const models = JSON.parse(modelsResponse.content);
                         const provider = orchestrator.getModelProvider();
                         panel.webview.postMessage({ command: 'setProvider', provider: provider });
                         panel.webview.postMessage({ command: 'updateModels', models: models });
-                        break;  
+                        break;
+                    }
                     case 'setModel':
                         await orchestrator.handleMessage(message);
                         panel.webview.postMessage({ command: 'setModel', model: message });
-                        break;  
-                    case 'setProvider':
+                        break;
+                    case 'setProvider': {
                         await orchestrator.handleMessage(message);
                         panel.webview.postMessage({ command: 'setProvider', provider: message.provider });
                         const setModels = await orchestrator.getModelsByProvider(message.provider);
                         panel.webview.postMessage({ command: 'updateModels', models: setModels });
                         panel.webview.html = getWebviewContent();
-                        break;  
+                        break;
+                    }
+                    case 'addProvider':
+                        await addProvider(context);
+                        break;
                     default:
                         await orchestrator.handleMessage(message);
                         break;
@@ -190,4 +207,50 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(disposable);
 }
 
-export function deactivate() {}
+// Define type guards
+function isValidApiType(value: string): value is ProviderConfig['apiType'] {
+    return ['Ollama', 'OpenAI', 'Claude'].includes(value);
+}
+
+function isValidCapability(value: string): value is ProviderConfig['capabilities'][number] {
+    return ['text', 'tool', 'image', 'embedding'].includes(value);
+}
+
+async function addProvider(context: vscode.ExtensionContext) {
+    const name = await vscode.window.showInputBox({ prompt: 'Enter provider name' });
+    const url = await vscode.window.showInputBox({ prompt: 'Enter provider URL' });
+    const apiKey = await vscode.window.showInputBox({ prompt: 'Enter API key (optional)', password: true });
+    const apiTypeInput = await vscode.window.showQuickPick(['Ollama', 'OpenAI', 'Claude'], { placeHolder: 'Select API type' });
+    const capabilitiesInput = await vscode.window.showQuickPick(
+        ['text', 'tool', 'image', 'embedding'],
+        { canPickMany: true, placeHolder: 'Select capabilities' }
+    );
+
+    if (name && url && apiTypeInput && capabilitiesInput) {
+        // Convert apiType to the correct type
+        const apiType = isValidApiType(apiTypeInput) ? apiTypeInput : 'Ollama'; // Default to 'Ollama' if invalid
+
+        // Convert capabilities to the correct type
+        const capabilities = capabilitiesInput.filter(isValidCapability);
+
+        const config: ProviderConfig = {
+            name,
+            url,
+            apiType,
+            capabilities,
+            defaultModel: '', // You might want to prompt for this or set a default
+            ...(apiKey && { apiKey })
+        };
+
+        const providersDir = path.join(context.extensionPath, 'providers');
+        if (!fs.existsSync(providersDir)) {
+            fs.mkdirSync(providersDir);
+        }
+        const filePath = path.join(providersDir, `${name}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(config, null, 2));
+        vscode.window.showInformationMessage(`Provider ${name} added successfully.`);
+    }
+}
+
+
+export function deactivate() { }

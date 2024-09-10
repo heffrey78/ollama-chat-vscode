@@ -22,10 +22,15 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
 const orchestrator_1 = require("./orchestrator");
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 function getWebviewContent() {
     return `<!DOCTYPE html>
     <html lang="en">
@@ -59,6 +64,7 @@ function getWebviewContent() {
         <div id="button-container">
             <button id="export-button">Export Chat</button>
             <button id="clear-button">Clear Chat</button>
+            <button id="add-provider-button">Add Provider</button>
         </div>
         <script>
             const vscode = acquireVsCodeApi();
@@ -69,6 +75,11 @@ function getWebviewContent() {
             const modelSelect = document.getElementById('model-select');
             const exportButton = document.getElementById('export-button');
             const clearButton = document.getElementById('clear-button');
+
+            const addProviderButton = document.getElementById('add-provider-button');
+            addProviderButton.addEventListener('click', () => {
+                vscode.postMessage({ command: 'addProvider' });
+            });
 
             function addMessage(text, isUser = false) {
                 const messageElement = document.createElement('p');
@@ -143,7 +154,7 @@ function getWebviewContent() {
 }
 function activate(context) {
     console.log('LLM Chat extension is now active!');
-    let disposable = vscode.commands.registerCommand('ollama-chat-vscode.startChat', async () => {
+    const disposable = vscode.commands.registerCommand('ollama-chat-vscode.startChat', async () => {
         const panel = vscode.window.createWebviewPanel('llmChat', 'LLM Chat', vscode.ViewColumn.One, {
             enableScripts: true
         });
@@ -162,32 +173,39 @@ function activate(context) {
                     await orchestrator.clearChatHistory();
                     panel.webview.postMessage({ command: 'chatCleared', text: 'Chat cleared' });
                     break;
-                case 'sendMessage':
+                case 'sendMessage': {
                     const response = await orchestrator.handleMessage(message);
                     panel.webview.postMessage({ command: 'receiveMessage', text: response.content });
                     break;
-                case 'refreshProviders':
+                }
+                case 'refreshProviders': {
                     const providersResponse = await orchestrator.handleMessage(message);
                     const providers = JSON.parse(providersResponse.content);
                     panel.webview.postMessage({ command: 'updateProviders', providers: providers });
                     break;
-                case 'refreshModels':
+                }
+                case 'refreshModels': {
                     const modelsResponse = await orchestrator.handleMessage(message);
                     const models = JSON.parse(modelsResponse.content);
                     const provider = orchestrator.getModelProvider();
                     panel.webview.postMessage({ command: 'setProvider', provider: provider });
                     panel.webview.postMessage({ command: 'updateModels', models: models });
                     break;
+                }
                 case 'setModel':
                     await orchestrator.handleMessage(message);
                     panel.webview.postMessage({ command: 'setModel', model: message });
                     break;
-                case 'setProvider':
+                case 'setProvider': {
                     await orchestrator.handleMessage(message);
                     panel.webview.postMessage({ command: 'setProvider', provider: message.provider });
                     const setModels = await orchestrator.getModelsByProvider(message.provider);
                     panel.webview.postMessage({ command: 'updateModels', models: setModels });
                     panel.webview.html = getWebviewContent();
+                    break;
+                }
+                case 'addProvider':
+                    await addProvider(context);
                     break;
                 default:
                     await orchestrator.handleMessage(message);
@@ -198,6 +216,41 @@ function activate(context) {
     context.subscriptions.push(disposable);
 }
 exports.activate = activate;
+// Define type guards
+function isValidApiType(value) {
+    return ['Ollama', 'OpenAI', 'Claude'].includes(value);
+}
+function isValidCapability(value) {
+    return ['text', 'tool', 'image', 'embedding'].includes(value);
+}
+async function addProvider(context) {
+    const name = await vscode.window.showInputBox({ prompt: 'Enter provider name' });
+    const url = await vscode.window.showInputBox({ prompt: 'Enter provider URL' });
+    const apiKey = await vscode.window.showInputBox({ prompt: 'Enter API key (optional)', password: true });
+    const apiTypeInput = await vscode.window.showQuickPick(['Ollama', 'OpenAI', 'Claude'], { placeHolder: 'Select API type' });
+    const capabilitiesInput = await vscode.window.showQuickPick(['text', 'tool', 'image', 'embedding'], { canPickMany: true, placeHolder: 'Select capabilities' });
+    if (name && url && apiTypeInput && capabilitiesInput) {
+        // Convert apiType to the correct type
+        const apiType = isValidApiType(apiTypeInput) ? apiTypeInput : 'Ollama'; // Default to 'Ollama' if invalid
+        // Convert capabilities to the correct type
+        const capabilities = capabilitiesInput.filter(isValidCapability);
+        const config = {
+            name,
+            url,
+            apiType,
+            capabilities,
+            defaultModel: '',
+            ...(apiKey && { apiKey })
+        };
+        const providersDir = path_1.default.join(context.extensionPath, 'providers');
+        if (!fs_1.default.existsSync(providersDir)) {
+            fs_1.default.mkdirSync(providersDir);
+        }
+        const filePath = path_1.default.join(providersDir, `${name}.json`);
+        fs_1.default.writeFileSync(filePath, JSON.stringify(config, null, 2));
+        vscode.window.showInformationMessage(`Provider ${name} added successfully.`);
+    }
+}
 function deactivate() { }
 exports.deactivate = deactivate;
 //# sourceMappingURL=extension.js.map

@@ -1,0 +1,9 @@
+{
+  "name": "claude",
+  "url": "https://api.anthropic.com",
+  "apiType": "Claude",
+  "capabilities": ["text", "tool"],
+  "defaultModel": "claude-3-5-sonnet-20240620",
+  "chatEndpoint": "/v1/chat/completions",
+  "completionEndpoint": "/v1/completions"
+}

@@ -1,270 +1,68 @@
-import * as vscode from 'vscode';
-import { Ollama, Message, ChatResponse, ChatRequest } from 'ollama';
-import axios from 'axios';
-import { ollamaTools, Tool } from './config/tools';
+import * as path from 'path';
+import axios, { AxiosError } from 'axios';
+import { LlmClient } from './llmClients/llmClient';
+import { loadAllProviderConfigs } from './config/config-utils';
+import { OpenAIClient } from './llmClients/openAiClient';
+import { ClaudeClient } from './llmClients/claudeClient';
+import { DynamicLlmClient } from './llmClients/dynamicClient';
+import { OllamaClient } from './llmClients/ollamaClient';
 
-export interface LlmClient {
-    model: string;
-    models: string[];
-    provider: string;
-    chat(params: ChatRequest): Promise<ChatResponse>;
-    setModel(model: string): Promise<void>;
-    getModels(): Promise<string[]>;
-    setModels(): Promise<void>;
-}
-
-export class OllamaClient implements LlmClient {
-    private ollama: Ollama;
-    models: string[] = [];
-    provider: string;
-    model: string = "";
-
-    constructor() {
-        this.ollama = new Ollama({ fetch: fetch as any });
-        this.setModel();
-        this.provider = "ollama"
-    }
-
-    async chat(params: ChatRequest): Promise<ChatResponse> {
-        if (params.stream === true) {
-            throw new Error("Streaming is not supported in this implementation");
-        }
-
-        let chatRequest: ChatRequest = params.tools ?
-            { model: params.model, messages: params.messages, stream: false, tools: params.tools } :
-            { model: params.model, messages: params.messages, stream: false };
-        return await this.ollama.chat({
-            ...chatRequest,
-            stream: false
-        });
-    }
-
-    async setModel(model: string = "llama3.1"): Promise<void> {
-        this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
-    }
-
-    async getModels(): Promise<string[]> {
-        if (!this.models || this.models.length == 0) {
-            const response = await this.ollama.list();
-            this.models = response.models.map(model => model.name);
-        }
-
-        return this.models;
-    }
-
-    async setModels() {
-        if (!this.models) {
-            this.models = await this.getModels();
-        }
-    }
-}
-
-export class ClaudeClient implements LlmClient {
-    private apiKey: string;
-    models: string[] = [];
-    provider: string;
-    model: string = "";
-
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
-        this.setModel();
-        this.provider = 'claude';
-    }
-
-    async chat(params: ChatRequest): Promise<ChatResponse> {
-        const response = await axios.post(
-            'https://api.anthropic.com/v1/chat/completions',
-            {
-                model: this.model,
-                messages: params.messages,
-                max_tokens_to_sample: 1000,
-            },
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': this.apiKey,
-                },
-            }
-        );
-
-        return {
-            model: this.model,
-            created_at: new Date(),
-            message: response.data.choices[0].message,
-            done: true,
-            done_reason: 'stop',
-            total_duration: 0,
-            load_duration: 0,
-            prompt_eval_count: 0,
-            prompt_eval_duration: 0,
-            eval_count: 0,
-            eval_duration: 0,
-        };
-    }
-
-    async setModel(model: string = "claude-3-5-sonnet-20240620"): Promise<void> {
-        this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
-    }
-
-    async getModels(): Promise<string[]> {
-        return [
-            "claude-3-5-sonnet-20240620",
-            "claude-3-opus-20240229",
-            "claude-3-haiku-20240307"
-        ];
-    }
-
-    async setModels() {
-        this.models = await this.getModels();
-    }
-}
-
-interface OpenAIFunction {
-    name: string;
-    description: string;
-    parameters: {
-        type: string;
-        properties: Record<string, unknown>;
-        required: string[];
-    };
-}
-
-export class OpenAIClient implements LlmClient {
-    private apiKey: string;
-    models: string[] = [];
-    provider: string;
-    model: string = "";
-
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
-        this.provider = "openai";
-        this.setModel();
-    }
-
-    async chat(params: ChatRequest): Promise<ChatResponse> {
-        const functions: OpenAIFunction[] = ollamaTools.map((tool: Tool) => ({
-            name: tool.function.name,
-            description: tool.function.description,
-            parameters: {
-                type: 'object',
-                properties: tool.function.parameters.properties,
-                required: tool.function.parameters.required
-            }
-        }));
-
-        const response = await axios.post(
-            'https://api.openai.com/v1/chat/completions',
-            {
-                model: this.model,
-                messages: params.messages,
-                functions: functions,
-                function_call: 'auto',
-            },
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`,
-                },
-            }
-        );
-
-        const message = response.data.choices[0].message;
-        let toolCalls: { id: string; type: string; function: { name: string; arguments: string } }[] = [];
-
-        if (message.function_call) {
-            toolCalls = [{
-                id: 'call_' + Math.random().toString(36).substr(2, 9),
-                type: 'function',
-                function: {
-                    name: message.function_call.name,
-                    arguments: message.function_call.arguments
-                }
-            }];
-        }
-
-        return {
-            model: this.model,
-            created_at: new Date(),
-            message: {
-                ...message,
-                tool_calls: toolCalls
-            },
-            done: true,
-            done_reason: 'stop',
-            total_duration: 0,
-            load_duration: 0,
-            prompt_eval_count: 0,
-            prompt_eval_duration: 0,
-            eval_count: 0,
-            eval_duration: 0,
-        };
-    }
-
-    async setModel(model: string = "gpt-3.5-turbo"): Promise<void> {
-        this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
-    }
-
-    async getModels(): Promise<string[]> {
-        if (!this.models || this.models.length == 0) {
-            try {
-                const response = await axios.get('https://api.openai.com/v1/models', {
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                    },
-                });
-
-                return response.data.data
-                    .filter((model: any) => model.id.startsWith('gpt-'))
-                    .map((model: any) => model.id);
-            } catch (error) {
-                console.error('Error fetching OpenAI models:', error);
-                return [];
-            }
-        }
-
-        return this.models;
-    }
-
-    async setModels() {
-        this.models = await this.getModels();
-    }
-}
-
-export async function createLlmClient(provider: string = 'ollama'): Promise<LlmClient> {
-    const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-    let client: LlmClient;
-
-    switch (provider.toLowerCase()) {
-        case 'ollama':
-            client = new OllamaClient();
-            break;
-        case 'claude':
-            const claudeApiKey = config.get('claudeApiKey') as string;
-            if (!claudeApiKey) {
-                throw new Error('Claude API key is not set');
-            }
-            client = new ClaudeClient(claudeApiKey);
-            break;
-        case 'openai':
-            const openaiApiKey = config.get('openaiApiKey') as string;
-            if (!openaiApiKey) {
-                throw new Error('OpenAI API key is not set');
-            }
-            client = new OpenAIClient(openaiApiKey);
-            break;
-        default:
-            throw new Error(`Unsupported LLM provider: ${provider}`);
-    }
+export async function loadProviders(): Promise<Map<string, LlmClient>> {
+    const providersDir = path.join(__dirname, 'providers');
+    const providers = new Map<string, LlmClient>();
 
     try {
-        // Fetch and cache the models
-        const models = await client.getModels();
+        const configs = await loadAllProviderConfigs(providersDir);
+        for (const config of configs) {
+
+            switch (config.name) {
+                case 'ollama':
+                    providers.set(config.name, new OllamaClient(config));
+                    break;
+                case 'openai':
+                    providers.set(config.name, new OpenAIClient(config));
+                    break;
+                case 'claude':
+                    providers.set(config.name, new ClaudeClient(config));
+                    break;
+                default:
+                    providers.set(config.name, new DynamicLlmClient(config));
+            }
+        }
     } catch (error) {
-        console.log(JSON.stringify(error));
+        console.error('Error loading provider configs:', error);
+    }
+
+    return providers;
+}
+
+export async function createLlmClient(provider: string): Promise<LlmClient> {
+    const providers = await loadProviders();
+    const client = providers.get(provider);
+    if (!client) {
+        throw new Error(`Unsupported LLM provider: ${provider}`);
     }
 
     return client;
+}
+
+
+// Custom function to handle Axios errors
+export function handleAxiosError(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError;
+        if (axiosError.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            return `Server error: ${axiosError.response.status} - ${axiosError.response.statusText}`;
+        } else if (axiosError.request) {
+            // The request was made but no response was received
+            return 'No response received from the server. Please check your network connection.';
+        } else {
+            // Something happened in setting up the request that triggered an Error
+            return `Error setting up the request: ${axiosError.message}`;
+        }
+    }
+    // For non-Axios errors
+    return `Non-axios error: ${JSON.stringify(error)}`;
 }

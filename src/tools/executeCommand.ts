@@ -16,23 +16,18 @@ export class ExecuteCommand implements Executable {
     }
 
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         const permissionQuestion = `Do you want to execute the following command on ${os.platform()}?\n${args.command}\n\nReply with 'YES' to proceed.`;
         let permissionResult: any = {};
 
-        try {
-            // Get the user's answer using a modal dialog
-            permissionResult = await vscode.window.showInputBox({
-                prompt: permissionQuestion,
-                placeHolder: 'Type your answer here',
-                ignoreFocusOut: true
-            });
+        // Get the user's answer using a modal dialog
+        permissionResult = await vscode.window.showInputBox({
+            prompt: permissionQuestion,
+            placeHolder: 'Type your answer here',
+            ignoreFocusOut: true
+        });
 
-            this.orchestrator.sendUpdateToPanel(JSON.stringify({ question: permissionQuestion, permissionResult }));
-        } catch (error) {
-            throw error;
-        }
-
+        this.orchestrator.sendUpdateToPanel(JSON.stringify({ question: permissionQuestion, permissionResult }));
 
         if (permissionResult.answer?.toUpperCase() === 'YES') {
             this.orchestrator.sendUpdateToPanel(`Executing command: ${args.command}`);

@@ -3,13 +3,14 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import ollama from 'ollama';
-import { Orchestrator } from './orchestrator';
-import { ollamaTools } from './config/tools';
+import { Orchestrator } from '../orchestrator';
+import { ollamaTools } from '../config/tools';
 import { createParser } from 'llm-exe';
-import { PipelineHandler, State } from './pipelineHandler'
-import { ExecuteCommand } from './tools/executeCommand';
-import { Executable } from './tools/executable';
+import { PipelineHandler, State } from '../pipelineHandler'
+import { ExecuteCommand } from './executeCommand';
+import { Executable } from './executable';
 import { exec } from 'child_process';
+import { logger } from '../logger';
 
 export class ListFilesTopLevel implements Executable {
     orchestrator: Orchestrator;
@@ -20,13 +21,16 @@ export class ListFilesTopLevel implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: any): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info(`Listing files in: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path}`);
             const dirPath = path.join(args.path);
             const files = await fs.readdir(dirPath, { withFileTypes: true });
+            logger.info(`Successfully listed ${files.length} files`);
             return { files: files.map(file => file.name) };
         } catch (error) {
+            logger.error(`Error listing files: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error listing files: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -42,13 +46,16 @@ export class ListFilesRecursive implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info(`Listing files in: ${args.path} (recursive)`);
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path} (recursive)`);
             const dirPath = path.join(args.path);
             const files = await this.recursiveReadDir(dirPath);
+            logger.info(`Successfully listed ${files.length} files recursively`);
             return { files };
         } catch (error) {
+            logger.error(`Error listing files recursively: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error listing files recursively: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -73,12 +80,15 @@ export class ViewSourceCodeDefinitions implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info('Viewing source code definitions');
             this.orchestrator.sendUpdateToPanel(`Viewing source code.`);
             // Implement source code parsing logic
+            logger.info('Source code definitions viewed successfully');
             return { definitions: [`class MyClass`, `function myFunction()`] };
         } catch (error) {
+            logger.error(`Error viewing source code definitions: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error viewing source code definitions: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -94,13 +104,16 @@ export class ReadFile implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info(`Reading file: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Reading file: ${args.path}`);
             const filePath = path.join(args.path);
             const content = await fs.readFile(filePath, 'utf-8');
+            logger.info(`File ${args.path} read successfully`);
             return { content };
         } catch (error) {
+            logger.error(`Error reading file: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error reading file: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -116,13 +129,16 @@ export class WriteToFile implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info(`Writing file: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Writing file: ${args.path}`);
             const filePath = path.join(args.path);
             await fs.writeFile(filePath, args.content, 'utf-8');
+            logger.info(`File ${filePath} written successfully`);
             return { status: `File ${filePath} written successfully` };
         } catch (error) {
+            logger.error(`Error writing to file: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error writing to file: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -138,22 +154,25 @@ export class AttemptCompletion implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info('Attempting completion');
             vscode.window.showInformationMessage(args.result);
             if (args.command) {
-                this.orchestrator.sendUpdateToPanel(`Attempted competion`);
+                logger.info(`Executing command: ${args.command}`);
+                this.orchestrator.sendUpdateToPanel(`Attempted completion`);
                 // Execute the command if provided
                 // Implement command execution logic here
             }
+            logger.info('Completion attempted successfully');
             return { status: 'Completion attempted' };
         } catch (error) {
+            logger.error(`Error attempting completion: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
             throw error;
         }
     }
 }
-
 
 export class CreateObjectives implements Executable {
     orchestrator: Orchestrator;
@@ -164,8 +183,9 @@ export class CreateObjectives implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info('Creating objectives');
             const stepName = 'objectives'
             const pipelinePrompt = `
                 # Ruminate on the <<USER REQUEST>> below:
@@ -199,9 +219,11 @@ export class CreateObjectives implements Executable {
             const objectivespipeLine = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
             state.set(stepName, JSON.stringify(objectivespipeLine));
 
+            logger.info('Objectives created successfully');
             return { status: 'Completion attempted' };
         } catch (error) {
-            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            logger.error(`Error creating objectives: ${getErrorMessage(error)}`);
+            this.orchestrator.sendErrorToPanel(`Error creating objectives: ${getErrorMessage(error)}`);
             throw error;
         }
     }
@@ -216,8 +238,9 @@ export class PlanDirectoryStructure implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info('Planning directory structure');
             const stepName = 'files'
             const pipelinePrompt = `
                 # Ruminate on the <<USER REQUEST>> and planned <<OBJECTIVES>> below:
@@ -250,9 +273,11 @@ export class PlanDirectoryStructure implements Executable {
             const filesPipeline = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
             state.set(stepName, JSON.stringify(filesPipeline));
 
+            logger.info('Directory structure planned successfully');
             return { status: 'Completion attempted' };
         } catch (error) {
-            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            logger.error(`Error planning directory structure: ${getErrorMessage(error)}`);
+            this.orchestrator.sendErrorToPanel(`Error planning directory structure: ${getErrorMessage(error)}`);
             throw error;
         }
     }
@@ -267,12 +292,13 @@ export class CreateTasks implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
-        let response = [];
+    async execute(args: any, state: State): Promise<any> {
+        const response = [];
         try {
+            logger.info('Creating tasks');
             const objectives = state.get('objectives');
             if(objectives || args.task) {
-                let objectivesJson = JSON.parse(objectives || JSON.stringify([{ objective: args.task }]));
+                const objectivesJson = JSON.parse(objectives || JSON.stringify([{ objective: args.task }]));
 
                 for(const objective in objectivesJson){
                     const pipelinePrompt = `
@@ -323,21 +349,21 @@ export class CreateTasks implements Executable {
                     }
                     `;
 
-
                     const taskResponse = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
                     response.push(taskResponse);
                 }
             }
 
             state.set('tasks', JSON.stringify(response));
+            logger.info('Tasks created successfully');
             return response;
         } catch (error) {
-            this.orchestrator.sendErrorToPanel(`Error attempting completion: ${getErrorMessage(error)}`);
+            logger.error(`Error creating tasks: ${getErrorMessage(error)}`);
+            this.orchestrator.sendErrorToPanel(`Error creating tasks: ${getErrorMessage(error)}`);
             throw error;
         }
     }
 }
-
 
 export class PipelineCreate implements Executable {
     orchestrator: Orchestrator;
@@ -356,8 +382,9 @@ export class PipelineCreate implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info('Creating pipeline');
             const pipelinePrompt = `
                 # Ruminate on the <<USER REQUEST>> below:
                 - In an upcoming task, you will break down the <<USER REQUEST>> in to <<OBJECTIVESS> that have <<TASKS>> that have <<FUNCTIONS>> that have <<ARGS>>.
@@ -395,21 +422,23 @@ export class PipelineCreate implements Executable {
             this.orchestrator.sendUpdateToPanel("Attempting to create plan.");
 
             const preplan = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
-            const files = await executeTool('plan_directory_structure', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
-            const objectives = await executeTool('create_objectives', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
-            const tasks = await executeTool('create_tasks', args.task, os.homedir.toString(), state, this.orchestrator, this.pipelineHandler);
+            const files = await executeTool('plan_directory_structure', args.task, state, this.orchestrator, this.pipelineHandler);
+            const objectives = await executeTool('create_objectives', args.task, state, this.orchestrator, this.pipelineHandler);
+            const tasks = await executeTool('create_tasks', args.task, state, this.orchestrator, this.pipelineHandler);
 
             let parsedTasks = this.tryParseJson(objectives);
 
             this.parsePipeline(JSON.stringify(planJson));
 
-
             if (this.pipeline) {
+                logger.info('Pipeline created successfully');
                 return this.pipeline; // Return the entire plan object
             } else {
+                logger.error('Failed to parse plan');
                 throw new Error('Failed to parse plan');
             }
         } catch (error) {
+            logger.error(`Error creating pipeline: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -420,7 +449,6 @@ export class PipelineCreate implements Executable {
         const jsonRegex = /^(\{|\[])([\s\S]*?)(\}|])$/;
 
         if (!jsonRegex.test(trimmedResponse)) {
-            // Remove non-JSON content from the beginning and end of the string
             trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
             trimmedResponse = trimmedResponse.replace(/\}\s+$/, '}');
         }
@@ -429,6 +457,7 @@ export class PipelineCreate implements Executable {
             const json = JSON.parse(trimmedResponse);
             return { success: true, json };
         } catch (error) {
+            logger.error(`Error parsing JSON: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -438,7 +467,7 @@ export class PipelineCreate implements Executable {
         const parser = createParser('json');
         if (pipelineString.length > 0) {
             const parsedPipeline = parser.parse(pipelineString);
-            console.log(JSON.stringify(parsedPipeline));
+            logger.info(`Parsed pipeline: ${JSON.stringify(parsedPipeline)}`);
 
             this.pipeline = {
                 name: parsedPipeline.name,
@@ -448,7 +477,7 @@ export class PipelineCreate implements Executable {
                 state: parsedPipeline.key_concepts
             };
         } else {
-            console.log('Failed to parse pipeline');
+            logger.error('Failed to parse pipeline');
         }
     }
 
@@ -466,11 +495,14 @@ export class Chat implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
-            const response = await ollama.chat(args.message);
+            logger.info(`Executing chat with message: ${args.message}`);
+            const response = await this.orchestrator.handleMessage( { command: 'sendMessage', message: args.message });
+            logger.info('Chat executed successfully');
             return { response: response };
         } catch (error) {
+            logger.error(`Error calling ollama.chat: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error calling ollama.chat: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -486,20 +518,23 @@ export class EnsureProjectFolder implements Executable {
         this.pipelineHandler = pipelineHandler;
     }
 
-    async execute(args: any, cwd: string, state: State): Promise<any> {
+    async execute(args: any, state: State): Promise<any> {
         try {
+            logger.info(`Checking project folder: ${args.projectName}`);
             this.orchestrator.sendUpdateToPanel(`Checking project folder: ${args.projectName}`);
-            const projectPath = path.join(cwd, args.projectName);
+            const projectPath = path.join(args.projectName);
             
             try {
                 await fs.access(projectPath);
+                logger.info(`Project folder ${args.projectName} already exists`);
                 return { status: `Project folder ${args.projectName} already exists` };
             } catch (error) {
-                // If the folder doesn't exist, create it
                 await fs.mkdir(projectPath, { recursive: true });
+                logger.info(`Project folder ${args.projectName} created successfully`);
                 return { status: `Project folder ${args.projectName} created successfully` };
             }
         } catch (error) {
+            logger.error(`Error handling project folder: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error handling project folder: ${getErrorMessage(error)}`);
             throw error;
         }
@@ -524,10 +559,10 @@ export const createTools = (messageHandler: Orchestrator, pipelineHandler: Pipel
 
 export async function executeTool(name: string, 
     args: any, 
-    cwd: string, 
     state: any, 
     orchestrator: Orchestrator, 
     pipelineHandler: PipelineHandler): Promise<any> {
+    logger.info(`Executing tool: ${name}`);
     // Trim the name of special characters
     const trimmedName = name.replace(/[^\w\s-]/g, '').trim();
 
@@ -548,12 +583,16 @@ export async function executeTool(name: string,
     const handler = toolHandlers[trimmedName];
     if (handler) {
         try {
-            return await handler.execute(trimmedArgs, cwd, state);
+            const result = await handler.execute(trimmedArgs, state);
+            logger.info(`Tool ${name} executed successfully`);
+            return result;
         } catch (error) {
+            logger.error(`Error executing tool ${name}: ${getErrorMessage(error)}`);
             throw error;
         }
     } else {
-        return await toolHandlers['chat'].execute({ message: `${trimmedName}: ${JSON.stringify(trimmedArgs)}` }, cwd, state);
+        logger.warn(`No handler found for tool ${name}, falling back to chat`);
+        return await toolHandlers['chat'].execute({ message: `${trimmedName}: ${JSON.stringify(trimmedArgs)}` }, state);
     }
 }
 

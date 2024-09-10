@@ -1,0 +1,8 @@
+{
+  "name": "ollama",
+  "url": "http://localhost:11434",
+  "apiType": "Ollama",
+  "capabilities": ["text", "tool", "embedding"],
+  "defaultModel": "llama3.1",
+  "modelsEndpoint": "/api/tags"
+}
