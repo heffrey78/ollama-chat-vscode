@@ -48,6 +48,7 @@ export class OllamaClient implements LlmClient {
 
                 return this.mapToChatResponse(response);
             } catch (error) {
+                
                 console.error('Error in Ollama chat:', error);
                 const errorMessage = handleAxiosError(error);
 
@@ -74,7 +75,7 @@ export class OllamaClient implements LlmClient {
                 model: this.model,
                 prompt: params.prompt,
                 system: systemMessage.content,
-                options: { num_predict: 128,  num_ctx: 2048 }
+                options: { num_ctx: 4096 }
             });
 
             return {
@@ -168,8 +169,8 @@ export class OllamaClient implements LlmClient {
         const ollamaMessages: OllamaMessage[] = params.messages.map(msg => ({
             role: msg.role,
             content: msg.content,
-            tool_calls: params.tools ? this.transformToOllamaToolCalls(params.tools) : undefined
         }));
+
 
         return {
             model: this.model,
@@ -177,7 +178,8 @@ export class OllamaClient implements LlmClient {
             stream: false,
             options: {
                num_ctx: 2048
-            }
+            },
+            tools: params.tools
         };
     }
 
@@ -202,10 +204,10 @@ export class OllamaClient implements LlmClient {
         }
     }
 
-    private transformToOllamaToolCalls(toolCalls?: Tool[]): OllamaToolCall[] {
+private transformToOllamaToolCalls(toolCalls?: Tool[]): OllamaToolCall[] {
         if (!toolCalls) return [];
 
-        return toolCalls.map(toolCall => ({
+        const ollamaToolCalls = toolCalls.map(toolCall => ({
             type: "function", // Explicitly set to "function"
             function: {
                 name: toolCall.function.name,
@@ -214,6 +216,8 @@ export class OllamaClient implements LlmClient {
                     : toolCall.function.parameters
             }
         } as OllamaToolCall));
+
+        return ollamaToolCalls;
     }
 
     private transformToToolCalls(toolCalls?: OllamaToolCall[]): ToolCall[]{
