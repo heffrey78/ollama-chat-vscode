@@ -11,11 +11,13 @@ import {
     ChatRequest as OllamaChatRequest,
     Message as OllamaMessage,
     ChatResponse as OllamaChatResponse,
-    ToolCall as OllamaToolCall
+    ToolCall as OllamaToolCall,
+    Tool
 } from 'ollama';
 import { LlmClient } from "./llmClient";
 import { systemMessage } from "../config/systemMessage";
 import { handleAxiosError } from "../llmClients";
+
 
 export class OllamaClient implements LlmClient {
     private config: ProviderConfig;
@@ -72,7 +74,7 @@ export class OllamaClient implements LlmClient {
                 model: this.model,
                 prompt: params.prompt,
                 system: systemMessage.content,
-                options: { num_predict: 128 }
+                options: { num_predict: 128,  num_ctx: 2048 }
             });
 
             return {
@@ -166,13 +168,16 @@ export class OllamaClient implements LlmClient {
         const ollamaMessages: OllamaMessage[] = params.messages.map(msg => ({
             role: msg.role,
             content: msg.content,
-            tool_calls: msg.tool_calls ? this.transformToOllamaToolCalls(msg.tool_calls) : undefined
+            tool_calls: params.tools ? this.transformToOllamaToolCalls(params.tools) : undefined
         }));
 
         return {
             model: this.model,
             messages: ollamaMessages,
             stream: false,
+            options: {
+               num_ctx: 2048
+            }
         };
     }
 
@@ -183,7 +188,7 @@ export class OllamaClient implements LlmClient {
             message: {
                 ...response.message,
                 tool_calls: response.message.tool_calls
-                    ? this.transformToOllamaToolCalls(response.message.tool_calls)
+                    ? this.transformToToolCalls(response.message.tool_calls)
                     : undefined
             },
             done: response.done,
@@ -194,21 +199,21 @@ export class OllamaClient implements LlmClient {
             eval_count: response.eval_count,
             eval_duration: response.eval_duration,
             done_reason: response.done_reason, // Include done_reason
-        };
+        }
     }
 
-    private transformToOllamaToolCalls(toolCalls?: OllamaToolCall[]): ToolCall[] {
+    private transformToOllamaToolCalls(toolCalls?: Tool[]): OllamaToolCall[] {
         if (!toolCalls) return [];
 
         return toolCalls.map(toolCall => ({
             type: "function", // Explicitly set to "function"
             function: {
                 name: toolCall.function.name,
-                arguments: typeof toolCall.function.arguments === 'string'
-                    ? this.parseArguments(toolCall.function.arguments)
-                    : toolCall.function.arguments
+                arguments: typeof toolCall.function.parameters === 'string'
+                    ? this.parseArguments(toolCall.function.parameters)
+                    : toolCall.function.parameters
             }
-        } as ToolCall));
+        } as OllamaToolCall));
     }
 
     private transformToToolCalls(toolCalls?: OllamaToolCall[]): ToolCall[]{

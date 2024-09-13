@@ -2,12 +2,12 @@ import * as vscode from 'vscode';
 import { PipelineHandler } from './pipelineHandler';
 import { ollamaTools } from './config/tools';
 import { systemMessage } from './config/systemMessage';
-import { createLlmClient } from './llmClients';
 import { Message } from './messages/message';
 import { GenerateRequest } from './chats/generateRequest';
 import { ChatRequest } from './chats/chatRequest';
 import { LlmClient } from './llmClients/llmClient';
 import { logger } from './logger';
+import { loadProviders } from './llmClients';
 
 // Extend the Message type to include the 'name' property for tool messages
 type ToolMessage = Message & { name?: string };
@@ -17,15 +17,13 @@ export class Orchestrator {
     private messages: ToolMessage[];
     private pipelineHandler: PipelineHandler;
     private panel: vscode.WebviewPanel;
-    private projectDirectory: string;
     private llmClient!: LlmClient;
 
-    constructor(panel: vscode.WebviewPanel, config: vscode.WorkspaceConfiguration, projectDirectory: string) {
+    constructor(panel: vscode.WebviewPanel, config: vscode.WorkspaceConfiguration) {
         this.panel = panel;
         this.config = config;
         this.messages = [systemMessage as ToolMessage];
         this.pipelineHandler = new PipelineHandler(this);
-        this.projectDirectory = projectDirectory;
         logger.info('Orchestrator initialized');
     }
 
@@ -47,7 +45,7 @@ export class Orchestrator {
                 await this.setModelProvider(message.provider || "");
                 return { role: 'assistant', content: 'provider set' };
             case 'refreshProviders': {
-                const providersResponse = this.getProviderList();
+                const providersResponse = await this.getProviderList();
                 const providerList = JSON.stringify(providersResponse);
                 return { role: 'system', content: providerList };
             }
@@ -165,8 +163,13 @@ export class Orchestrator {
     private async initializeLlmClient(provider: string = "ollama"): Promise<void> {
         try {
             logger.info(`Initializing LLM client for provider: ${provider}`);
-            this.llmClient = await createLlmClient(provider);
-            await this.getModelsByProvider(this.llmClient.provider);
+            const args = { command: provider } 
+            const response = await this.pipelineHandler.executeAdhocToolCall('llm_client_handler', args);
+
+            if(response && response.llmClient) {
+                this.llmClient = response.llmClient as LlmClient;
+                await this.getModelsByProvider(this.llmClient.provider);
+            }
         } catch (error) {
             if (error instanceof Error && error.message.includes('API key is not set')) {
                 logger.warn(`API key not set for provider: ${provider}`);
@@ -186,7 +189,10 @@ export class Orchestrator {
         });
         if (apiKey) {
             await this.config.update(`${provider}ApiKey`, apiKey, vscode.ConfigurationTarget.Global);
-            this.llmClient = await createLlmClient(provider);
+            if(!this.llmClient || this.llmClient.provider != provider) {
+                await this.initializeLlmClient(provider);
+            }
+
             logger.info(`API key set and LLM client created for provider: ${provider}`);
         } else {
             logger.error(`${provider} API key is required but not provided`);
@@ -194,19 +200,23 @@ export class Orchestrator {
         }
     }
 
-    private getProviderList(): string[] {
-        const providers = ['ollama', 'ollama-cli', 'claude', 'openai'];
-        logger.info(`Provider list: ${providers.join(', ')}`);
-        return providers;
+    private async getProviderList(): Promise<string[]> {
+        return await this.getProviderNames();
+    }
+
+    async getProviderNames(): Promise<string[]> {
+        const providers = await loadProviders();
+        return Array.from(providers.keys());
     }
 
     public async getModelsByProvider(provider: string): Promise<string[]> {
         logger.info(`Getting models for provider: ${provider}`);
         if (!this.llmClient || this.llmClient.provider != provider) {
-            this.llmClient = await createLlmClient(provider);
+            await this.initializeLlmClient(provider);
         }
 
         const models = await this.llmClient.getModels();
+        this.llmClient.models = models;
         logger.info(`Models for provider ${provider}: ${models.join(', ')}`);
         return models;
     }

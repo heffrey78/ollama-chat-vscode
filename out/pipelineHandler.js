@@ -64,9 +64,14 @@ class PipelineHandler {
                 objectives: undefined,
                 tasks: toolArray
             };
-            this.pipelines.push(pipeline);
             logger_1.logger.info(`Created new pipeline 'Toolcalls' with ${toolArray.length} tool calls`);
+            return pipeline;
         }
+        throw new Error('Pipeline was unable to be created');
+    }
+    createAndAddPipeline(toolArray) {
+        const pipeline = this.createPipeline(toolArray);
+        this.pipelines.push(pipeline);
     }
     async generatePipelinePart(pipelinePrompt) {
         const maxRetries = 3;
@@ -141,7 +146,7 @@ class PipelineHandler {
                         arguments: { message: messageContent }
                     }
                 };
-                this.createPipeline([chatToolCall]);
+                this.createAndAddPipeline([chatToolCall]);
                 if (this.pipelines.length == 1) {
                     await this.executePipelines();
                 }
@@ -213,6 +218,23 @@ class PipelineHandler {
     }
     isPipeline(obj) {
         return obj && typeof obj === 'object' && typeof obj.name === 'string' && typeof obj.directoryName === 'string' && Array.isArray(obj.tasks);
+    }
+    generateToolCall(toolName, args) {
+        const toolCall = {
+            id: uuid.v4.toString(),
+            type: 'function',
+            function: {
+                name: toolName,
+                arguments: args
+            }
+        };
+        return toolCall;
+    }
+    async executeAdhocToolCall(toolName, args) {
+        const toolCall = this.generateToolCall(toolName, args);
+        const pipeline = this.createPipeline([toolCall]);
+        const result = await this.executeToolCall(pipeline, toolCall);
+        return result;
     }
     async executeToolCall(pipeLine, toolCall) {
         const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeLine, JSON.stringify(toolCall.function.arguments)) : "";

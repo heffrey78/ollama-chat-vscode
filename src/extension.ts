@@ -106,7 +106,7 @@ function getWebviewContent() {
                 const message = event.data;
                 switch (message.command) {
                     case 'receiveMessage':
-                        addMessage(message.text);
+                        addMessage(message.content);
                         break;
                     case 'updateProviders':
                         providerSelect.innerHTML = message.providers.map(provider => 
@@ -151,8 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
         panel.webview.html = getWebviewContent();
 
         const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-        const projectDirectory = config.get<string>('projectDirectory') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        const orchestrator = new Orchestrator(panel, config, projectDirectory);
+        const orchestrator = new Orchestrator(panel, config);
 
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(

@@ -10,6 +10,7 @@ import { ExecuteCommand } from './executeCommand';
 import { Executable, ExecutableArgs, ExecutableReturn } from './executable';
 import { logger } from '../logger';
 import { Message } from '../messages/message';
+import { LlmClientCreator } from '../llmClients';
 
 
 export class ListFilesTopLevel implements Executable {
@@ -369,8 +370,8 @@ export class PipelineCreate implements Executable {
     orchestrator: Orchestrator;
     pipelineHandler: PipelineHandler;
 
-    constructor(messageHandler: Orchestrator, pipelineHandler: PipelineHandler) {
-        this.orchestrator = messageHandler;
+    constructor(orchestrator: Orchestrator, pipelineHandler: PipelineHandler) {
+        this.orchestrator = orchestrator;
         this.pipelineHandler = pipelineHandler;
     }
 
@@ -538,20 +539,21 @@ export class EnsureProjectFolder implements Executable {
     }
 }
 
-export const createTools = (messageHandler: Orchestrator, pipelineHandler: PipelineHandler): { [key: string]: Executable } => ({
-    execute_command: new ExecuteCommand(messageHandler, pipelineHandler),
-    list_files_top_level: new ListFilesTopLevel(messageHandler, pipelineHandler),
-    list_files_recursive: new ListFilesRecursive(messageHandler, pipelineHandler),
-    view_source_code_definitions_top_level: new ViewSourceCodeDefinitions(messageHandler, pipelineHandler),
-    read_file: new ReadFile(messageHandler, pipelineHandler),
-    write_to_file: new WriteToFile(messageHandler, pipelineHandler),
-    attempt_completion: new AttemptCompletion(messageHandler, pipelineHandler),
-    planner: new PipelineCreate(messageHandler, pipelineHandler),
-    chat: new Chat(messageHandler, pipelineHandler),
-    project_folder: new EnsureProjectFolder(messageHandler, pipelineHandler),
-    create_objectives: new CreateObjectives(messageHandler, pipelineHandler),
-    create_tasks: new CreateTasks(messageHandler, pipelineHandler),
-    plan_directory_structure: new PlanDirectoryStructure(messageHandler, pipelineHandler),
+export const createTools = (orchestrator: Orchestrator, pipelineHandler: PipelineHandler): { [key: string]: Executable } => ({
+    execute_command: new ExecuteCommand(orchestrator, pipelineHandler),
+    list_files_top_level: new ListFilesTopLevel(orchestrator, pipelineHandler),
+    list_files_recursive: new ListFilesRecursive(orchestrator, pipelineHandler),
+    view_source_code_definitions_top_level: new ViewSourceCodeDefinitions(orchestrator, pipelineHandler),
+    read_file: new ReadFile(orchestrator, pipelineHandler),
+    write_to_file: new WriteToFile(orchestrator, pipelineHandler),
+    attempt_completion: new AttemptCompletion(orchestrator, pipelineHandler),
+    planner: new PipelineCreate(orchestrator, pipelineHandler),
+    chat: new Chat(orchestrator, pipelineHandler),
+    project_folder: new EnsureProjectFolder(orchestrator, pipelineHandler),
+    create_objectives: new CreateObjectives(orchestrator, pipelineHandler),
+    create_tasks: new CreateTasks(orchestrator, pipelineHandler),
+    plan_directory_structure: new PlanDirectoryStructure(orchestrator, pipelineHandler),
+    llm_client_handler: new LlmClientCreator(orchestrator, pipelineHandler),
 });
 
 export async function executeTool(name: string, 

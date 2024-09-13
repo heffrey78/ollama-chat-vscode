@@ -8,7 +8,7 @@ import { ChatRequest } from '../chats/chatRequest';
 import { LlmClient } from './llmClient';
 import { ProviderConfig } from '../config/providerConfig';
 
-export class OllamaClitClient implements LlmClient {
+export class OllamaCliClient implements LlmClient {
     private config: ProviderConfig;
     models: string[] = [];
     provider: string;

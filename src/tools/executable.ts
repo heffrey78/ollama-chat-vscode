@@ -1,3 +1,4 @@
+import { LlmClient } from "../llmClients/llmClient";
 import { Message } from "../messages/message";
 import { Orchestrator } from "../orchestrator";
 import { Pipeline, PipelineHandler, State } from "../pipelineHandler";
@@ -14,6 +15,7 @@ export interface ExecutableReturn {
     results?: string[];
     pipeline?: Pipeline;
     message?: Message;
+    llmClient?: LlmClient;
     error?: string;
 }
 

@@ -31,6 +31,8 @@ const vscode = __importStar(require("vscode"));
 const orchestrator_1 = require("./orchestrator");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
+const child_process = __importStar(require("child_process"));
+const util_1 = require("util");
 function getWebviewContent() {
     return `<!DOCTYPE html>
     <html lang="en">
@@ -66,6 +68,7 @@ function getWebviewContent() {
             <button id="export-button">Export Chat</button>
             <button id="clear-button">Clear Chat</button>
             <button id="add-provider-button">Add Provider</button>
+            <button id="update-ollama-button">Update Ollama</button>
         </div>
         <script>
             const vscode = acquireVsCodeApi();
@@ -76,10 +79,15 @@ function getWebviewContent() {
             const modelSelect = document.getElementById('model-select');
             const exportButton = document.getElementById('export-button');
             const clearButton = document.getElementById('clear-button');
-
             const addProviderButton = document.getElementById('add-provider-button');
+            const updateOllamaButton = document.getElementById('update-ollama-button');
+
             addProviderButton.addEventListener('click', () => {
                 vscode.postMessage({ command: 'addProvider' });
+            });
+
+            updateOllamaButton.addEventListener('click', () => {
+                vscode.postMessage({ command: 'updateOllama' });
             });
 
             function addMessage(text, isUser = false) {
@@ -125,7 +133,7 @@ function getWebviewContent() {
                 const message = event.data;
                 switch (message.command) {
                     case 'receiveMessage':
-                        addMessage(message.text);
+                        addMessage(message.content);
                         break;
                     case 'updateProviders':
                         providerSelect.innerHTML = message.providers.map(provider => 
@@ -161,8 +169,7 @@ function activate(context) {
         });
         panel.webview.html = getWebviewContent();
         const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
-        const projectDirectory = config.get('projectDirectory') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        const orchestrator = new orchestrator_1.Orchestrator(panel, config, projectDirectory);
+        const orchestrator = new orchestrator_1.Orchestrator(panel, config);
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
@@ -208,6 +215,9 @@ function activate(context) {
                 case 'addProvider':
                     await addProvider(context);
                     break;
+                case 'updateOllama':
+                    await updateOllama();
+                    break;
                 default:
                     await orchestrator.handleMessage(message);
                     break;
@@ -250,6 +260,39 @@ async function addProvider(context) {
         const filePath = path_1.default.join(providersDir, `${name}.json`);
         fs_1.default.writeFileSync(filePath, JSON.stringify(config, null, 2));
         vscode.window.showInformationMessage(`Provider ${name} added successfully.`);
+    }
+}
+async function updateOllama() {
+    // Prompt user for sudo password
+    const password = await vscode.window.showInputBox({
+        prompt: 'Enter sudo password to update Ollama',
+        password: true,
+        ignoreFocusOut: true
+    });
+    if (password) {
+        // Execute the command
+        const command = `echo "${password}" | sudo -S bash -c "curl -fsSL https://ollama.com/install.sh | sh"`;
+        try {
+            const execPromise = (0, util_1.promisify)(child_process.exec);
+            const { stdout, stderr } = await execPromise(command);
+            if (stdout) {
+                console.log(`Command output: ${stdout}`);
+                vscode.window.showInformationMessage('Ollama updated successfully.');
+            }
+            if (stderr) {
+                console.log(`Command error: ${stderr}`);
+                vscode.window.showErrorMessage(`Error updating Ollama: ${stderr}`);
+            }
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.log(`Error executing command: ${errorMessage}`);
+            vscode.window.showErrorMessage(`Error updating Ollama: ${errorMessage}`);
+            throw error;
+        }
+    }
+    else {
+        vscode.window.showWarningMessage('Password not provided. Ollama update cancelled.');
     }
 }
 function deactivate() { }

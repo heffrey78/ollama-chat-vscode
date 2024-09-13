@@ -55,7 +55,7 @@ export class PipelineHandler {
     return pipeline;
   }
 
-  createPipeline(toolArray: ToolCall[]) {
+  createPipeline(toolArray: ToolCall[]): Pipeline {
     if (Array.isArray(toolArray) && toolArray.every(item => this.isToolCall(item))) {
       const pipeline: Pipeline = {
         name: 'Toolcalls',
@@ -64,9 +64,16 @@ export class PipelineHandler {
         objectives: undefined,
         tasks: toolArray
       };
-      this.pipelines.push(pipeline);
       logger.info(`Created new pipeline 'Toolcalls' with ${toolArray.length} tool calls`);
+      return pipeline;
     }
+
+    throw new Error('Pipeline was unable to be created');
+  }
+
+  createAndAddPipeline(toolArray: ToolCall[]) {
+    const pipeline = this.createPipeline(toolArray);
+    this.pipelines.push(pipeline)
   }
 
   async generatePipelinePart(pipelinePrompt: string): Promise<any> {
@@ -119,7 +126,7 @@ export class PipelineHandler {
   private async tryParseJson(response: string): Promise<{ success: boolean; json?: any }> {
     let trimmedResponse = response.trim();
     const jsonRegex = /(\{[\s\S]*?\}|\[[\s\S]*?\])/g;
-  
+
     const matches = trimmedResponse.match(jsonRegex);
     if (matches) {
       // Find the longest JSON string
@@ -127,7 +134,7 @@ export class PipelineHandler {
     } else {
       trimmedResponse = trimmedResponse.replace(/^[^\{\[]+|[^\}\]]+$/, '');
     }
-  
+
     try {
       const json = JSON.parse(trimmedResponse);
       logger.info('Successfully parsed JSON response');
@@ -135,35 +142,35 @@ export class PipelineHandler {
     } catch (error) {
       logger.error(`Error parsing JSON: ${this.getErrorMessage(error)}`);
       this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${this.getErrorMessage(error)}`);
-  
+
       // Call LLM for parsing improvement suggestions
       try {
         const errorMessage = this.getErrorMessage(error);
         const stackTrace = error instanceof Error ? error.stack : 'No stack trace available';
         const messageContent = `I encountered an error while parsing JSON: "${errorMessage}". Here's the stack trace: ${stackTrace}. Can you suggest improvements to the parsing method or identify potential issues with the JSON string?`;
-        
+
 
         const chatToolCall: ToolCall = {
           id: uuid.v4(),
           type: "function",
           function: {
-              name: 'chat',
-              arguments: { message: messageContent }
+            name: 'chat',
+            arguments: { message: messageContent }
           }
-      };
+        };
 
-        this.createPipeline([chatToolCall]);
-        if(this.pipelines.length == 1) {
+        this.createAndAddPipeline([chatToolCall]);
+        if (this.pipelines.length == 1) {
           await this.executePipelines();
         }
       } catch (llmError) {
         logger.error(`Error getting LLM suggestion: ${this.getErrorMessage(llmError)}`);
       }
-  
+
       return { success: false };
     }
   }
-  
+
 
   async executePipeline(pipeline: Pipeline): Promise<any[]> {
     const results: any[] = [];
@@ -231,6 +238,26 @@ export class PipelineHandler {
 
   private isPipeline(obj: any): obj is Pipeline {
     return obj && typeof obj === 'object' && typeof obj.name === 'string' && typeof obj.directoryName === 'string' && Array.isArray(obj.tasks);
+  }
+
+  private generateToolCall(toolName: string, args: { [key: string]: any; }): ToolCall {
+    const toolCall: ToolCall = {
+      id: uuid.v4.toString(),
+      type: 'function',
+      function: {
+        name: toolName,
+        arguments: args
+      }
+    };
+
+    return toolCall;
+  }
+
+  public async executeAdhocToolCall(toolName: string, args: { [key: string]: any; }): Promise<any> {
+    const toolCall = this.generateToolCall(toolName, args);
+    const pipeline = this.createPipeline([toolCall]);
+    const result = await this.executeToolCall(pipeline, toolCall);
+    return result;
   }
 
   private async executeToolCall(pipeLine: Pipeline, toolCall: ToolCall): Promise<any> {
