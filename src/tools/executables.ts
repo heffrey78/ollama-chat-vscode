@@ -252,7 +252,7 @@ export class CreateObjectives implements Executable {
             this.orchestrator.sendUpdateToPanel(`Creating objectives`);
             const stepName = 'objectives'
             const pipelinePrompt = `{
-                instructions: "Analyze the USER_REQUEST and create a list of OBJECTIVES describing a viable solution. These objectives will later be broken down into tasks.",
+                instructions: "Analyze the USER_REQUEST and create a list of OBJECTIVES describing a viable solution. These objectives will later be broken down into tasks. Double check that objectives serve the request, are achieveable, and in order",
                 user_request: "${args.task}",
                 system_info: {
                   os: "${os.platform()}",
@@ -309,7 +309,7 @@ export class PlanDirectoryStructure implements Executable {
             this.orchestrator.sendUpdateToPanel(`Planning directory structure`);
             const stepName = 'files'
             const pipelinePrompt = `{
-                instructions: "Analyze the USER_REQUEST and OBJECTIVES to create a sensible file structure.",
+                instructions: "Analyze the USER_REQUEST and OBJECTIVES to create a sensible file structure for that will meet the needs of the request. Double check that best practices are followed in the construction of the file system and that it meets the request and objectives.",
                 user_request: "${args.task}",
                 objectives: "${state.get('objectives') || 'no objectives'}",
                 system_info: {
@@ -368,7 +368,7 @@ export class CreateTasks implements Executable {
                 for(const objective in objectivesJson){
                     const pipelinePrompt = `
                     {
-                    "instructions": "Analyze the USER_REQUEST and create a plan to fulfill it. Use the provided OBJECTIVE as context.",
+                    "instructions": "Analyze the USER_REQUEST and OBJECTIVE to create an array of tasks that will be executed and validated in order so that the objective is met. Double check results for accuracy, order of execution, and achievement of the objective",
                     "output_format": {
                         "type": "json",
                         "structure": {
@@ -443,8 +443,8 @@ export class CreatePlanPipeline implements Executable {
             const pipelinePrompt = `{
                 instructions: [
                   "Analyze the USER_REQUEST and create a project overview.",
-                  "In a future task, you will break down the USER_REQUEST into OBJECTIVES with TASKS, FUNCTIONS, and ARGS.",
-                  "For now, focus on the following:"
+                  "In a future step, you will break down the USER_REQUEST into OBJECTIVES with TASKS, FUNCTIONS, and ARGS.",
+                  "For now, only focus on the following:"
                 ],
                 tasks: [
                   "Write a brief (200 words or less) outlining the overarching methodology to solve the request",
@@ -468,7 +468,8 @@ export class CreatePlanPipeline implements Executable {
                 constraints: [
                   "Output must be formatted for machine reading",
                   "Provide only JSON output, no explanations or comments",
-                  "Return a complete, minified JSON object"
+                  "Return a complete, minified JSON object using the output_format as a template",
+                  "Double check your results for accuracy and efficacy"
                 ],
                 attempts: 0
               }`;
