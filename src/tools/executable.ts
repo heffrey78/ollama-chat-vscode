@@ -8,6 +8,9 @@ export interface ExecutableArgs {
     task?: string;
     command?: string;
     path?: string;
+    query?: string;
+    provider?: string;
+    key_value_pairs?: Map<string, string>;
 }
 
 export interface ExecutableReturn {

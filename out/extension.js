@@ -28,11 +28,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
-const orchestrator_1 = require("./orchestrator");
+const child_process = __importStar(require("child_process"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const child_process = __importStar(require("child_process"));
 const util_1 = require("util");
+const orchestrator_1 = require("./orchestrator");
+const messageType_1 = require("./messages/messageType");
 function getWebviewContent() {
     return `<!DOCTYPE html>
     <html lang="en">
@@ -52,12 +53,7 @@ function getWebviewContent() {
         </style>
     </head>
     <body>
-        <select id="provider-select">
-            <option value="ollama">Ollama</option>
-            <option value="ollama-cli">Ollama CLI Client</option>
-            <option value="claude">Claude</option>
-            <option value="openai">OpenAI</option>
-        </select>
+        <select id="provider-select"></select>
         <select id="model-select"></select>
         <div id="chat-container"></div>
         <div id="input-container">
@@ -145,6 +141,12 @@ function getWebviewContent() {
                             '<option value="' + model + '">' + model + '</option>'
                         ).join('');
                         break;
+                    case 'setProvider':
+                        providerSelect.value = message.provider;
+                        break;
+                    case 'setModel':
+                        modelSelect.value = message.model;
+                        break;
                     case 'chatExported':
                         vscode.window.showInformationMessage('Chat history exported successfully!');
                         break;
@@ -173,49 +175,48 @@ function activate(context) {
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
-                case 'exportChat':
+                case messageType_1.MessageType.ExportChat:
                     await orchestrator.exportChatHistory();
                     panel.webview.postMessage({ command: 'chatExported', content: 'Chat exported' });
                     break;
-                case 'clearChat':
+                case messageType_1.MessageType.ClearChat:
                     await orchestrator.clearChatHistory();
                     panel.webview.postMessage({ command: 'chatCleared', content: 'Chat cleared' });
                     break;
-                case 'sendMessage': {
+                case messageType_1.MessageType.SendMessage: {
                     const response = await orchestrator.handleMessage(message);
                     panel.webview.postMessage({ command: 'receiveMessage', content: response.content });
                     break;
                 }
-                case 'refreshProviders': {
+                case messageType_1.MessageType.RefreshProviders: {
                     const providersResponse = await orchestrator.handleMessage(message);
                     const providers = JSON.parse(providersResponse.content);
                     panel.webview.postMessage({ command: 'updateProviders', providers: providers });
                     break;
                 }
-                case 'refreshModels': {
+                case messageType_1.MessageType.RefreshModels: {
                     const modelsResponse = await orchestrator.handleMessage(message);
                     const models = JSON.parse(modelsResponse.content);
-                    const provider = orchestrator.getModelProvider();
+                    const provider = await orchestrator.getModelProvider();
                     panel.webview.postMessage({ command: 'setProvider', provider: provider });
                     panel.webview.postMessage({ command: 'updateModels', models: models });
                     break;
                 }
-                case 'setModel':
+                case messageType_1.MessageType.SetModel:
                     await orchestrator.handleMessage(message);
-                    panel.webview.postMessage({ command: 'setModel', model: message });
+                    panel.webview.postMessage({ command: 'setModel', model: message.model });
                     break;
-                case 'setProvider': {
+                case messageType_1.MessageType.SetProvider: {
                     await orchestrator.handleMessage(message);
                     panel.webview.postMessage({ command: 'setProvider', provider: message.provider });
                     const setModels = await orchestrator.getModelsByProvider(message.provider);
                     panel.webview.postMessage({ command: 'updateModels', models: setModels });
-                    panel.webview.html = getWebviewContent();
                     break;
                 }
-                case 'addProvider':
+                case messageType_1.MessageType.AddProvider:
                     await addProvider(context);
                     break;
-                case 'updateOllama':
+                case messageType_1.MessageType.UpdateOllama:
                     await updateOllama();
                     break;
                 default:

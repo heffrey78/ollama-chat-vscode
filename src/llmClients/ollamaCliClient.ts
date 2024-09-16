@@ -7,6 +7,7 @@ import { ChatResponse } from '../chats/chatResponse';
 import { ChatRequest } from '../chats/chatRequest';
 import { LlmClient } from './llmClient';
 import { ProviderConfig } from '../config/providerConfig';
+import { updateWorkspaceConfig } from '../config/config-utils';
 
 export class OllamaCliClient implements LlmClient {
     private config: ProviderConfig;
@@ -69,9 +70,14 @@ export class OllamaCliClient implements LlmClient {
         }
     }
 
+    async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
+        throw new Error("Not implemented");
+    }
+
     async setModel(model: string = "llama3.1"): Promise<void> {
         this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
+        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+        await updateWorkspaceConfig(config, 'modelName', model);
     }
 
     async getModels(): Promise<string[]> {
@@ -97,6 +103,7 @@ export class OllamaCliClient implements LlmClient {
                 .slice(1)  // Skip the first line (header)
                 .filter(line => line.trim() !== '')
                 .map(line => line.split(' ')[0]);
+                
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.log(`Error executing getting models: ${errorMessage}`);

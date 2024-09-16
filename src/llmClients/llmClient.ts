@@ -10,6 +10,7 @@ export interface LlmClient {
     provider: string;
     chat(params: ChatRequest): Promise<ChatResponse | undefined>;
     generate(params: GenerateRequest): Promise<GenerateResponse | undefined>;
+    simulateToolCall(prompt: string): Promise<ChatResponse | undefined>;
     setModel(model: string): Promise<void>;
     getModels(): Promise<string[]>;
     setModels(): Promise<void>;

@@ -8,6 +8,7 @@ import { ollamaTools, Tool } from "../config/tools";
 import { LlmClient } from "./llmClient";
 import { OpenAIFunction } from './openAIFunction';
 import * as vscode from 'vscode';
+import { updateWorkspaceConfig } from "../config/config-utils";
 
 export class OpenAIClient implements LlmClient {
     private apiKey: string = "";
@@ -93,9 +94,14 @@ export class OpenAIClient implements LlmClient {
         return undefined;
     }
 
+    async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
+        throw new Error("Not implemented");
+    }
+
     async setModel(model: string = "gpt-3.5-turbo"): Promise<void> {
         this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
+        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+        await updateWorkspaceConfig(config, 'modelName', model);
     }
 
     async getModels(): Promise<string[]> {

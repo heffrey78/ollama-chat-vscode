@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProviderConfig } from './providerConfig';
@@ -37,3 +38,15 @@ export async function loadAllProviderConfigs(providersDir: string): Promise<Prov
   }
   return configs;
 }
+
+export async function updateWorkspaceConfig(workpsaceConfiguration: vscode.WorkspaceConfiguration, key: string, value: any): Promise<void> {
+  // Check if a workspace is open
+  if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+    // Workspace is open, update workspace configuration
+    await workpsaceConfiguration.update(key, value, vscode.ConfigurationTarget.Workspace);
+  } else {
+    // No workspace open, update global configuration
+    await vscode.workspace.getConfiguration().update(`ollama-chat-vscode.${key}`, value, vscode.ConfigurationTarget.Global);
+  }
+}
+

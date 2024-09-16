@@ -6,17 +6,19 @@ import { GenerateResponse } from '../chats/generateResponse';
 import { ProviderConfig } from "../config/providerConfig";
 import { LlmClient } from "./llmClient";
 import * as vscode from 'vscode';
+import { updateWorkspaceConfig } from "../config/config-utils";
 
 export class ClaudeClient implements LlmClient {
     private apiKey: string = "";
     private config: ProviderConfig;
     private apiClient: AxiosInstance;
-    models: string[] = [];
+    models: string[];
     provider: string;
-    model: string = "";
+    model: string;
 
     constructor(config: ProviderConfig) {
         this.config = config;
+        this.models = [];
         this.provider = config.name;
         this.model = config.defaultModel;
         this.apiClient = axios.create({
@@ -33,6 +35,7 @@ export class ClaudeClient implements LlmClient {
                 model: this.model,
                 messages: params.messages,
                 max_tokens_to_sample: 1000,
+                tools: params.tools
             },
             {
                 headers: {
@@ -58,12 +61,46 @@ export class ClaudeClient implements LlmClient {
     }
 
     async generate(params: GenerateRequest): Promise<GenerateResponse | undefined> {
-        return undefined;
+        try {
+            const response = await axios.post(
+                'https://api.anthropic.com/v1/complete',
+                {
+                    prompt: params.prompt,
+                    model: params.model || 'claude-v1',
+                    max_tokens_to_sample: 1000,
+                    temperature: 0.7,
+                    top_p: 1,
+                    stop_sequences: [],
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': process.env.CLAUDE_API_KEY,
+                    },
+                }
+            );
+    
+            return {
+                response: response.data.completion,
+                model: response.data.model,
+                done_reason: response.data.stop_reason,
+                context: response.data.context
+            };
+        } catch (error) {
+            console.error('Error calling Claude API:', error);
+            return undefined;
+        }
+    }
+
+    async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
+
+        throw new Error("Not implemented");
     }
 
     async setModel(model: string = "claude-3-5-sonnet-20240620"): Promise<void> {
         this.model = model;
-        await vscode.workspace.getConfiguration('ollama-chat-vscode').update('modelName', model, vscode.ConfigurationTarget.Global);
+        const config = vscode.workspace.getConfiguration('ollama-chat-vscode');
+        await updateWorkspaceConfig(config, 'modelName', model);
     }
 
     async getModels(): Promise<string[]> {

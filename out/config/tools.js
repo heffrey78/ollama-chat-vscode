@@ -203,7 +203,7 @@ exports.ollamaTools = [
     //             required: ['request']
     //         }
     //     }
-    // },
+    // },    
     {
         type: 'function',
         function: {
@@ -238,5 +238,27 @@ exports.ollamaTools = [
     //         }
     //     }
     // },
+    {
+        type: 'function',
+        function: {
+            name: 'web_search',
+            description: 'Perform a web search using a specified provider and return the top 5 results.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description: 'The search query to execute.'
+                    },
+                    provider: {
+                        type: 'string',
+                        description: 'The search provider to use (google, brave, or duckduckgo). Defaults to duckduckgo if not specified.',
+                        enum: ['google', 'brave', 'duckduckgo']
+                    }
+                },
+                required: ['query']
+            }
+        }
+    }
 ];
 //# sourceMappingURL=tools.js.map

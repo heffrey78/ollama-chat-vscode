@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PipelineHandler } from './pipelineHandler';
+import { Pipeline, PipelineHandler } from './pipelineHandler';
 import { ollamaTools } from './config/tools';
 import { systemMessage } from './config/systemMessage';
 import { Message } from './messages/message';
@@ -8,8 +8,11 @@ import { ChatRequest } from './chats/chatRequest';
 import { LlmClient } from './llmClients/llmClient';
 import { logger } from './logger';
 import { loadProviders } from './llmClients';
+import { updateWorkspaceConfig } from './config/config-utils';
+import { MessageType } from './messages/messageType';
+import { ToolCall } from './pipelines/toolCall';
+import { MessageRole } from './messages/messsageRole';
 
-// Extend the Message type to include the 'name' property for tool messages
 type ToolMessage = Message & { name?: string };
 
 export class Orchestrator {
@@ -18,61 +21,70 @@ export class Orchestrator {
     private pipelineHandler: PipelineHandler;
     private panel: vscode.WebviewPanel;
     private llmClient!: LlmClient;
+    private currentProvider: string;
 
     constructor(panel: vscode.WebviewPanel, config: vscode.WorkspaceConfiguration) {
         this.panel = panel;
         this.config = config;
         this.messages = [systemMessage as ToolMessage];
         this.pipelineHandler = new PipelineHandler(this);
+        this.currentProvider = '';
         logger.info('Orchestrator initialized');
     }
 
     public async handleMessage(message: Message): Promise<Message> {
         logger.info(`Handling message: ${message.command}`);
-        switch (message.command) {
-            case 'sendMessage': {
+        switch (message.command as MessageType) {
+            case MessageType.SendMessage: {
                 const response = await this.executeLlmChatRequest(message.content, message.tool_calls && message.tool_calls.length > 0);
+                if(response && response.tool_calls){
+                    const pipeline = this.createPipeline(response.tool_calls);
+                    logger.info('Pipeline created in orchestrator sendMessage');
+                    const pipelineResponseMessage = await this.executePipeline(pipeline);
+                    logger.info(`Pipeline completed in orchestrator sendMessage: ${JSON.stringify(pipelineResponseMessage)}`);
+                }
                 return response;
             }
-            case 'generate': {
+            case MessageType.Generate: {
                 const generationResponse = await this.executeLlmGenerateRequest(message.content);
                 return generationResponse;
             }
-            case 'setModel':
+            case MessageType.SetModel:
                 await this.setModel(message.model || "");
-                return { role: 'assistant', content: 'model set' };
-            case 'setProvider':
+                return { role: MessageRole.Assistant, content: 'model set' };
+            case MessageType.SetProvider:
                 await this.setModelProvider(message.provider || "");
-                return { role: 'assistant', content: 'provider set' };
-            case 'refreshProviders': {
+                return { role: MessageRole.Assistant, content: 'provider set' };
+            case MessageType.RefreshProviders: {
                 const providersResponse = await this.getProviderList();
                 const providerList = JSON.stringify(providersResponse);
-                return { role: 'system', content: providerList };
+                return { role: MessageRole.System, content: providerList };
             }
-            case 'refreshModels': {
+            case MessageType.RefreshModels: {
                 const provider = await this.getModelProvider();
                 const modelResponse = await this.getModelsByProvider(provider);
                 const modelList = JSON.stringify(modelResponse);
-                return { role: 'system', content: modelList };
+                return { role: MessageRole.System, content: modelList };
             }
-            case 'executePipeline':
-                return await this.executePipelines();
             default:
                 logger.warn(`No message handler found for command: ${message.command}`);
-                return { role: 'assistant', content: 'No message handler found.' };
+                return { role: MessageRole.Assistant, content: 'No message handler found.' };
         }
     }
 
     private async executeLlmChatRequest(content: string, tool_use: boolean = false): Promise<Message> {
         try {
             logger.info(`Executing LLM chat request: ${content.substring(0, 50)}...`);
+            
             const modelName = this.llmClient.model;
-            const newMessage: Message = { role: 'user', content: content };
-            this.messages.push(newMessage);
+
+            const newMessage: Message = { role: MessageRole.User, content: content };
+            this.addMessage(newMessage);
+            
             const request: ChatRequest = { model: modelName, messages: this.messages, stream: false };
 
             if (tool_use || // explicit tool call 
-                this.pipelineHandler.pipelines.length == 0) { // first call and so necessarily a tool call
+                this.pipelineHandler.getPipelinesLength() == 0) { // first call and so necessarily a tool call
                 request.tools = ollamaTools;
                 request.messages = [systemMessage, newMessage];
             }
@@ -81,13 +93,11 @@ export class Orchestrator {
 
             if (response) {
                 if (response.message.tool_calls) {
-                    this.createPipeline(response.message.tool_calls);
-                    this.messages.push(response.message as ToolMessage); // tool response
-                    logger.info(`Tool call ${JSON.stringify(response.message.tool_calls)}`);
-                    await this.executePipelines();
+                    this.addMessage(response.message); 
+                    logger.info(`Tool response ${JSON.stringify(response.message.tool_calls)}`);
                 } else {
-                    this.messages.push(response.message); // chat responselogger.info(`Successful tool call ${JSON.stringify(response.message.tool_calls)}`);
-                    logger.info(`Chat call ${JSON.stringify(response.message)}`);
+                    this.addMessage(response.message); // chat responselogger.info(`Successful tool call ${JSON.stringify(response.message.tool_calls)}`);
+                    logger.info(`Chat response ${JSON.stringify(response.message)}`);
                 }
                 return response.message;
             }
@@ -95,7 +105,7 @@ export class Orchestrator {
             logger.error(`Error communicating with LLM: ${JSON.stringify(error)}`);
             this.sendErrorToPanel('Error communicating with LLM: ' + JSON.stringify(error));
         }
-        return { role: 'assistant', content: 'An unexpected error occurred' };
+        return { role: MessageRole.Assistant, content: 'An unexpected error occurred' };
     }
 
     // Experiment with generate over chat
@@ -103,15 +113,17 @@ export class Orchestrator {
         try {
             logger.info(`Executing LLM generate request: ${content.substring(0, 50)}...`);
             const modelName = this.llmClient.model;
-            const newMessage: Message = { role: 'user', content: content };
-            this.messages.push(newMessage);
+
+            const newMessage: Message = { role: MessageRole.User, content: content };
+            this.addMessage(newMessage);
+            
             const request: GenerateRequest = { model: modelName, prompt: content, system: systemMessage.content, stream: false, format: "json" };
 
             const response = await this.llmClient.generate(request);
 
             if (response) {
-                const replyMessage = { role: 'assistant', content: response.response };
-                this.messages.push(replyMessage);
+                const replyMessage = { role: MessageRole.Assistant, content: response.response, context: response.context };
+                this.addMessage(replyMessage);
                 logger.info(`LLM generate request completed successfully`);
                 return replyMessage;
             }
@@ -119,14 +131,14 @@ export class Orchestrator {
             logger.error(`Error communicating with LLM: ${JSON.stringify(error)}`);
             this.sendErrorToPanel('Error communicating with LLM: ' + JSON.stringify(error));
         }
-        return { role: 'assistant', content: 'An unexpected error occurred' };
+        return { role: MessageRole.Assistant, content: 'An unexpected error occurred' };
     }
 
-    public async executePipelines(): Promise<Message> {
+    public async executePipeline(pipeline: Pipeline): Promise<Message> {
         logger.info('Executing pipelines');
-        const results = await this.pipelineHandler.executePipelines();
+        const results = await this.pipelineHandler.executePipeline(pipeline);
         logger.info(`Pipelines execution completed. Pipeline results: ${JSON.stringify(results)}`);
-        return { role: 'assistant', content: 'Pipeline executed' };
+        return { role: MessageRole.Assistant, content: 'Pipeline executed' };
     }
 
     private async setModel(model: string) {
@@ -135,19 +147,35 @@ export class Orchestrator {
     }
 
     private async setModelProvider(provider: string) {
-        logger.info(`Setting model provider to: ${provider}`);
-        await this.config.update('provider', provider, vscode.ConfigurationTarget.Global);
-        if (!this.llmClient || !this.llmClient.provider || this.llmClient.provider != provider) {
-            await this.initializeLlmClient(provider);
+        try {
+            logger.info(`Setting model provider to: ${provider}`);
+
+            await updateWorkspaceConfig(this.config, 'provider', provider);
+            
+            // Update the current provider in memory
+            this.currentProvider = provider;
+
+            if (!this.llmClient || !this.llmClient.provider || this.llmClient.provider != provider) {
+                await this.initializeLlmClient(provider);
+            }
+            else this.llmClient.provider = provider;
+        } 
+        catch(error) {
+            if (error instanceof Error && error.message.includes('Model provider not set')) {
+                logger.warn(`Model provider not set for: ${provider}`);
+                await this.handleApiKeyRequest(provider);
+            } else {
+                logger.error(`Error setting model provider: ${JSON.stringify(error)}`);
+                throw error;
+            }
         }
-        else this.llmClient.provider = provider;
     }
 
     public async getModelProvider(): Promise<string> {
         if (!this.llmClient) {
             await this.initializeLlmClient();
         }
-        return this.llmClient.provider;
+        return this.currentProvider || this.llmClient.provider;
     }
 
     public sendUpdateToPanel(updateText: string) {
@@ -168,7 +196,6 @@ export class Orchestrator {
 
             if(response && response.llmClient) {
                 this.llmClient = response.llmClient as LlmClient;
-                await this.getModelsByProvider(this.llmClient.provider);
             }
         } catch (error) {
             if (error instanceof Error && error.message.includes('API key is not set')) {
@@ -188,7 +215,7 @@ export class Orchestrator {
             password: true
         });
         if (apiKey) {
-            await this.config.update(`${provider}ApiKey`, apiKey, vscode.ConfigurationTarget.Global);
+            await vscode.workspace.getConfiguration().update(`ollama-chat-vscode.${provider}ApiKey`, apiKey, vscode.ConfigurationTarget.Global);
             if(!this.llmClient || this.llmClient.provider != provider) {
                 await this.initializeLlmClient(provider);
             }
@@ -221,17 +248,27 @@ export class Orchestrator {
         return models;
     }
 
-    private createPipeline(toolCalls: ToolCall[]) {
+    private createPipeline(toolCalls: ToolCall[]): Pipeline {
         logger.info(`Creating new pipeline from tool calls: ${JSON.stringify(toolCalls)}`);
-        this.pipelineHandler.createPipeline(toolCalls);
+        const pipeline = this.pipelineHandler.createPipeline(toolCalls);
+        this.pipelineHandler.addPipeline(pipeline);
+        return pipeline;
     }
 
+    private isToolMessage(response: Message): response is ToolMessage {
+        return (response as ToolMessage).name !== undefined;
+    }
+
+    private addMessage(message: Message) {
+        this.messages.push(message);
+    }
+    
     public async exportChatHistory() {
         logger.info('Exporting chat history');
         const chatHistory = this.messages.map(msg => {
             if (msg.role === 'user') {
                 return `User: ${msg.content}`;
-            } else if (msg.role === 'assistant') {
+            } else if (msg.role === MessageRole.Assistant) {
                 return `LLM: ${msg.content}`;
             } else if (msg.role === 'system') {
                 return `System: ${msg.content}`;

@@ -63,7 +63,12 @@ export function handleAxiosError(error: unknown): string {
         }
     }
     // For non-Axios errors
-    return `Non-axios error: ${JSON.stringify(error)}`;
+    return `Non-axios error: ${error}`;
+}
+
+
+export function isToolError(llmclient: LlmClient, error: unknown): boolean {
+    return error instanceof Error && error.message.includes('does not support tools');
 }
 
 export async function loadProviders(): Promise<Map<string, LlmClient>> {

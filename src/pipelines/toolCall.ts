@@ -1,5 +1,4 @@
-
-interface ToolCall {
+export interface ToolCall {
   id: string;
   type: "function";
   function: {

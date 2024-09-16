@@ -1,4 +1,7 @@
 
+import { ToolCall
+    
+ } from "../pipelines/toolCall";
 export interface Message {
     role: string;
     content: string;
@@ -7,4 +10,5 @@ export interface Message {
     command?: string;
     model?: string;
     provider?: string;
+    context?: number[];
 }
