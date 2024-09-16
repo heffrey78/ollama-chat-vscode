@@ -656,7 +656,7 @@ export async function executeTool(name: string,
     if (handler) {
         try {
             const result = await handler.execute(trimmedArgs, state);
-            logger.info(`Tool ${name} executed successfully`);
+            logger.info(`Tool result: ${result}`);
             return result;
         } catch (error) {
             logger.error(`Error executing tool ${name}: ${getErrorMessage(error)}`);

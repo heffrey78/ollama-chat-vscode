@@ -30,9 +30,9 @@ export class ExecuteCommand implements Executable {
             ignoreFocusOut: true
         });
 
-        this.orchestrator.sendUpdateToPanel(JSON.stringify({ question: permissionQuestion, permissionResult }));
+        this.orchestrator.sendUpdateToPanel(`Permission question: ${permissionQuestion}, User answer: ${permissionResult}`);
 
-        if (permissionResult.answer?.toUpperCase() === 'YES') {
+        if (permissionResult?.toUpperCase() === 'YES') {
             this.orchestrator.sendUpdateToPanel(`Executing command: ${args.command}`);
 
             try {
