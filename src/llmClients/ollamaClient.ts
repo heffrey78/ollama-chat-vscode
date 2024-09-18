@@ -20,6 +20,7 @@ import { handleAxiosError, isToolError } from "../llmClients";
 import { updateWorkspaceConfig } from '../config/config-utils';
 import { ollamaTools } from '../config/tools';
 import { ToolCall } from '../pipelines/toolCall';
+import { MessageTools } from '../messages/messageTools';
 
 interface TaskFunction {
     name: string;
@@ -40,6 +41,7 @@ interface ResponseWithTasks {
 export class OllamaClient implements LlmClient {
     private config: ProviderConfig;
     private ollama: Ollama;
+    private messageTools: MessageTools;
     models: string[] = [];
     provider: string;
     model: string = "";
@@ -51,6 +53,7 @@ export class OllamaClient implements LlmClient {
         this.ollama = new Ollama({
             host: config.url
         });
+        this.messageTools = new MessageTools();
 
         this.setModel();
     }
@@ -141,41 +144,33 @@ export class OllamaClient implements LlmClient {
     async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
         const toolSelectionPrompt = `
         {
-          "instructions": "Analyze the user_request. Only choose the most appropriate tool(s) from the available and provide their parameters.",
+          "instructions": "Act as a JSON formatter. Analyze the user_request. Choose one tool that will complete the request from the available tools and provide their parameters. If the request is just a query for information, respond normally. If the taks is complex user the 'planner' and only the 'planner'",
           "output_format": {
             "type": "json",
             "structure": {
-              "tasks": [
+              "toolCalls": [
                 {
-                  "task": "Description of the task",
-                  "objective_name": "Name of the related objective",
-                  "function": {
-                    "name": "Name of the tool to execute",
-                    "working_directory": "Directory for function execution",
-                    "arguments": {}
-                  },
-                {
-                  "validation_task": "Description of the validation task",
-                  "objective_name": "Name of the related objective",
-                  "function": {
-                    "name": "Name of the validation tool to execute",
-                    "working_directory": "Directory for function execution",
-                    "arguments": {}
-                  },
+                "id": "string", 
+                "type": "function", 
+                "function": {
+                    "name": "string", // name of function to call
+                    "arguments": 
+                    { 
+                        [key: string]: any // key-value pairs representing function argument names and values
+                    };
+                },
                 }
               ]
             }
           },
           "constraints": [
-            "Each task must have a single, atomic function",
-            "Each task must have at least one validating function",
-            "Only include tools that are directly relevant to the request",
-            "Validating 
-            functions should verify the success of the previous function"
+            "Each tool must have a single, atomic function",
+            "Only use tools that are directly relevant to the request",
+            "Prefer the planning tool unless a direct request like web
           ],
             "system_info": {
-                "os": ${os.platform()},
-                "home_directory": ${os.homedir()},
+                "os": "${os.platform()}",
+                "home_directory": "${os.homedir()}",
                 "available_tools": ${JSON.stringify(ollamaTools)}
             },
           "user_request": "${prompt}"
@@ -183,17 +178,25 @@ export class OllamaClient implements LlmClient {
         `;
 
         try {
-            const request: GenerateRequest = { model: this.model, prompt: toolSelectionPrompt, system: systemMessage.content, stream: false, format: "json" };
+            prompt = this.prepareStringForLLM(prompt);
+            const request: GenerateRequest = { model: this.model, 
+                prompt: toolSelectionPrompt, 
+                system: systemMessage.content, 
+                stream: false, 
+                format: "json" };
             const response = await this.generate(request);
             
             if(response) {
+                const toolCalls = await this.messageTools.multiAttemptJsonParse(JSON.stringify(response.response));
+
                 const chatResponse: ChatResponse = {
                     model: response.model,
                     created_at: new Date(),
                     message: { 
                         role: 'assistant', 
                         content: response.response, 
-                        tool_calls: response.response ? this.transformToToolCalls(JSON.parse(response.response))
+                        tool_calls: response.response ? 
+                        this.transformToToolCalls(toolCalls.json)
                         : undefined},
                     done: true,
                     done_reason: response.done_reason,

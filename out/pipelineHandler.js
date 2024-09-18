@@ -29,11 +29,13 @@ const uuid = __importStar(require("uuid"));
 const executables_1 = require("./tools/executables");
 const logger_1 = require("./logger");
 const messageType_1 = require("./messages/messageType");
+const messageTools_1 = require("./messages/messageTools");
 class PipelineHandler {
     constructor(messageHandler) {
         this.lastErrorMessage = '';
         this.orchestrator = messageHandler;
         this.pipelines = [];
+        this.messageTools = new messageTools_1.MessageTools();
         logger_1.logger.info('PipelineHandler initialized');
     }
     // Pipeline Management
@@ -52,18 +54,21 @@ class PipelineHandler {
         return pipeline;
     }
     createPipeline(toolArray) {
-        if (Array.isArray(toolArray) && toolArray.every(item => this.isToolCall(item))) {
-            const pipeline = {
-                name: 'Toolcalls',
-                directoryName: (0, os_1.homedir)(),
-                state: new Map(),
-                objectives: undefined,
-                toolCalls: toolArray
-            };
-            logger_1.logger.info(`Created new pipeline 'Toolcalls' with ${toolArray.length} tool calls`);
-            return pipeline;
+        if (!Array.isArray(toolArray)) {
+            throw new Error('Input must be an array of ToolCalls');
         }
-        throw new Error('Pipeline was unable to be created');
+        if (!toolArray.every(item => this.isToolCall(item))) {
+            throw new Error('All items in the array must be valid ToolCalls');
+        }
+        const pipeline = {
+            name: `Toolcalls-${new Date().toISOString()}`,
+            directoryName: (0, os_1.homedir)(),
+            state: new Map(),
+            objectives: [],
+            toolCalls: toolArray,
+        };
+        logger_1.logger.info(`Created new pipeline '${pipeline.name}' with ${toolArray.length} tool calls`);
+        return pipeline;
     }
     createAndAddPipeline(toolArray) {
         const pipeline = this.createPipeline(toolArray);
@@ -76,6 +81,11 @@ class PipelineHandler {
     }
     getPipelinesLength() {
         return this.pipelines.length;
+    }
+    getToolCallsLength() {
+        let toolCallsLength = 0;
+        this.pipelines.map(x => x.toolCalls.length).forEach(x => toolCallsLength += x);
+        return toolCallsLength;
     }
     // Tool Call Management
     addToolCalls(pipeline, newToolCalls) {
@@ -94,27 +104,33 @@ class PipelineHandler {
     async executePipeline(pipeline) {
         const results = [];
         const processedToolCalls = [];
-        logger_1.logger.info(`Executing pipeline ${pipeline.name}`);
-        if (pipeline) {
-            while (pipeline.toolCalls.length > 0) {
-                const task = pipeline.toolCalls.shift();
-                if (task && !pipeline.toolCalls.find(x => x.id === task.id)) {
-                    try {
-                        const result = await this.executeToolCall(pipeline, task);
-                        results.push(result);
-                        this.orchestrator.sendUpdateToPanel(`Called: ${task.function.name} with arguments ${JSON.stringify(task.function.arguments)}. \n\n The result was ${result}`);
-                        this.updateState(pipeline, task.function.name, result);
-                        this.handleExecutionResult(result);
-                    }
-                    catch (error) {
-                        this.handleExecutionError(task, error);
-                    }
-                    finally {
-                        processedToolCalls.push(task);
+        try {
+            logger_1.logger.info(`Executing pipeline ${pipeline.name}`);
+            if (pipeline) {
+                while (pipeline.toolCalls.length > 0) {
+                    const task = pipeline.toolCalls.shift();
+                    if (task && !pipeline.toolCalls.find(x => x.id === task.id)) {
+                        try {
+                            const result = await this.executeToolCall(pipeline, task);
+                            results.push(result);
+                            this.orchestrator.sendUpdateToPanel(`Called: ${task.function.name} with arguments ${JSON.stringify(task.function.arguments)}. \n\n The result was ${JSON.stringify(result)}`);
+                            this.updateState(pipeline, task.function.name, result);
+                            this.handleExecutionResult(result);
+                        }
+                        catch (error) {
+                            this.handleExecutionError(task, error);
+                        }
+                        finally {
+                            processedToolCalls.push(task);
+                        }
                     }
                 }
             }
         }
+        catch (error) {
+            this.handlePipelineError(pipeline, error);
+        }
+        this.removePipeline(pipeline);
         logger_1.logger.info(`Pipeline ${pipeline.name} execution completed`);
         this.displayPipeline();
         return results;
@@ -122,7 +138,9 @@ class PipelineHandler {
     async executeAdhocToolCall(toolName, args) {
         const toolCall = this.generateToolCall(toolName, args);
         const pipeline = this.createPipeline([toolCall]);
-        return await this.executeToolCall(pipeline, toolCall);
+        const result = await this.executeToolCall(pipeline, toolCall);
+        this.removePipeline(pipeline);
+        return result;
     }
     // Pipeline Generation
     async generatePipelinePart(pipelinePrompt) {
@@ -130,15 +148,15 @@ class PipelineHandler {
         let retryCount = 0;
         while (retryCount < maxRetries) {
             try {
-                const pipelineJson = JSON.parse(pipelinePrompt);
-                if (pipelineJson.attempts) {
-                    pipelineJson.attempts = retryCount;
+                const pipelineJsonParse = await this.messageTools.multiAttemptJsonParse(pipelinePrompt); // await this.messageTools.tryParseJson(pipelinePrompt);
+                if (pipelineJsonParse && pipelineJsonParse.attempts) {
+                    pipelineJsonParse.attempts = retryCount;
                 }
-                const pipelinePartMessage = this.createGenerateMessage(JSON.stringify(pipelineJson));
+                const pipelinePartMessage = this.createGenerateMessage(JSON.stringify(pipelineJsonParse));
                 logger_1.logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
                 const pipelineResponse = await this.orchestrator.handleMessage(pipelinePartMessage);
-                const { success, json } = await this.tryParseJson(pipelineResponse.content);
-                if (success) {
+                const json = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
+                if (json) {
                     logger_1.logger.info('Successfully generated pipeline part');
                     return json;
                 }
@@ -159,6 +177,9 @@ class PipelineHandler {
     isPipeline(obj) {
         return obj && typeof obj === 'object' && typeof obj.name === 'string' && typeof obj.directoryName === 'string' && Array.isArray(obj.toolCalls);
     }
+    removePipeline(pipeline) {
+        this.pipelines = Array.from(this.pipelines).filter(item => item !== pipeline);
+    }
     generateToolCall(toolName, args) {
         return {
             id: uuid.v4(),
@@ -170,9 +191,15 @@ class PipelineHandler {
         };
     }
     async executeToolCall(pipeline, toolCall) {
-        const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeline, JSON.stringify(toolCall.function.arguments)) : "";
-        logger_1.logger.info(`Executing tool call: ${toolCall.function.name}`);
-        return await (0, executables_1.executeTool)(toolCall.function.name, JSON.parse(args), pipeline.state, this.orchestrator, this);
+        try {
+            const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeline, JSON.stringify(toolCall.function.arguments)) : "";
+            logger_1.logger.info(`Executing tool call: ${toolCall.function.name}`);
+            return await (0, executables_1.executeTool)(toolCall.function.name, JSON.parse(args), pipeline.state, this.orchestrator, this);
+        }
+        catch (error) {
+            logger_1.logger.error(`Error occurred while executing tool call: ${this.getErrorMessage(error)}`);
+            throw error;
+        }
     }
     updateArgumentsFromState(pipeline, args) {
         let replacedArgs = args;
@@ -210,6 +237,10 @@ class PipelineHandler {
             logger_1.logger.info(`Created new ad-hoc pipeline with ${result.length} tool calls`);
         }
     }
+    handlePipelineError(pipeline, error) {
+        logger_1.logger.error(`Error executing tool call "${pipeline.name}": ${this.getErrorMessage(error)}`);
+        this.orchestrator.sendUpdateToPanel(`Error executing tool call "${pipeline.name}": \n\n ${error}`);
+    }
     handleExecutionError(task, error) {
         logger_1.logger.error(`Error executing tool call "${task.function.name}": ${this.getErrorMessage(error)}`);
         this.orchestrator.sendUpdateToPanel(`Error executing tool call "${task.function.name}": \n\n ${error}`);
@@ -235,61 +266,6 @@ class PipelineHandler {
             content: pipelinePrompt,
             tool_use: false
         };
-    }
-    async tryParseJson(response) {
-        let trimmedResponse = response.trim().replace(/^[^{\[]+|[^}\]]+$/g, '');
-        const jsonRegex = /(\{[\s\S]*?\}|\[[\s\S]*?\])/g;
-        const matches = trimmedResponse.match(jsonRegex);
-        if (matches) {
-            trimmedResponse = matches.join('');
-            //trimmedResponse = matches.reduce((a, b) => a.length > b.length ? a : b);
-        }
-        trimmedResponse = this.balanceBracketsAndBraces(trimmedResponse);
-        trimmedResponse = this.fixEncodingIssues(trimmedResponse);
-        try {
-            const json = JSON.parse(trimmedResponse);
-            logger_1.logger.info('Successfully parsed JSON response');
-            return { success: true, json };
-        }
-        catch (error) {
-            logger_1.logger.error(`Error parsing JSON: ${this.getErrorMessage(error)}`);
-            this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${this.getErrorMessage(error)}`);
-            return { success: false };
-        }
-    }
-    balanceBracketsAndBraces(str) {
-        const stack = [];
-        const open = { '{': '}', '[': ']' };
-        const close = { '}': '{', ']': '[' };
-        let balanced = str;
-        for (const char of str) {
-            if (char in open) {
-                stack.push(char);
-            }
-            else if (char in close) {
-                if (stack.length === 0 || stack[stack.length - 1] !== close[char]) {
-                    stack.push(close[char]);
-                    balanced = close[char] + balanced;
-                }
-                else {
-                    stack.pop();
-                }
-            }
-        }
-        while (stack.length > 0) {
-            const char = stack.pop();
-            balanced += open[char];
-        }
-        return balanced;
-    }
-    fixEncodingIssues(str) {
-        return str
-            .replace(/[\u2018\u2019]/g, "'")
-            .replace(/[\u201C\u201D]/g, '"')
-            .replace(/\u2026/g, '...')
-            .replace(/\u2013/g, '-')
-            .replace(/\u2014/g, '--')
-            .replace(/\u00A0/g, ' ');
     }
     getErrorMessage(error) {
         return error instanceof Error ? error.message : String(error);

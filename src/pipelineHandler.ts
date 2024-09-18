@@ -6,12 +6,14 @@ import { logger } from './logger';
 import { Message } from "./messages/message";
 import { MessageType } from "./messages/messageType";
 import { ToolCall } from "./pipelines/toolCall";
+import { MessageTools } from "./messages/messageTools";
+import { pipeline } from "stream";
 
 export interface Objective {
   objective: string;
 }
 
-export interface State extends Map<string, string> {}
+export interface State extends Map<string, string> { }
 
 export interface Pipeline {
   name: string;
@@ -24,10 +26,12 @@ export interface Pipeline {
 export class PipelineHandler {
   private orchestrator: Orchestrator;
   private pipelines: Pipeline[];
+  private messageTools: MessageTools;
 
   constructor(messageHandler: Orchestrator) {
     this.orchestrator = messageHandler;
     this.pipelines = [];
+    this.messageTools = new MessageTools();
     logger.info('PipelineHandler initialized');
   }
 
@@ -49,18 +53,24 @@ export class PipelineHandler {
   }
 
   createPipeline(toolArray: ToolCall[]): Pipeline {
-    if (Array.isArray(toolArray) && toolArray.every(item => this.isToolCall(item))) {
-      const pipeline: Pipeline = {
-        name: 'Toolcalls',
-        directoryName: homedir(),
-        state: new Map<string, string>(),
-        objectives: undefined,
-        toolCalls: toolArray
-      };
-      logger.info(`Created new pipeline 'Toolcalls' with ${toolArray.length} tool calls`);
-      return pipeline;
+    if (!Array.isArray(toolArray)) {
+      throw new Error('Input must be an array of ToolCalls');
     }
-    throw new Error('Pipeline was unable to be created');
+
+    if (!toolArray.every(item => this.isToolCall(item))) {
+      throw new Error('All items in the array must be valid ToolCalls');
+    }
+
+    const pipeline: Pipeline = {
+      name: `Toolcalls-${new Date().toISOString()}`, // Add timestamp to name for uniqueness
+      directoryName: homedir(),
+      state: new Map<string, string>(),
+      objectives: [],
+      toolCalls: toolArray,
+    };
+
+    logger.info(`Created new pipeline '${pipeline.name}' with ${toolArray.length} tool calls`);
+    return pipeline;
   }
 
   createAndAddPipeline(toolArray: ToolCall[]): Pipeline {
@@ -76,6 +86,12 @@ export class PipelineHandler {
 
   getPipelinesLength(): number {
     return this.pipelines.length;
+  }
+
+  getToolCallsLength(): number {
+    let toolCallsLength = 0;
+    this.pipelines.map(x => x.toolCalls.length).forEach(x => toolCallsLength += x);
+    return toolCallsLength;
   }
 
   // Tool Call Management
@@ -97,27 +113,32 @@ export class PipelineHandler {
   async executePipeline(pipeline: Pipeline): Promise<any[]> {
     const results: any[] = [];
     const processedToolCalls: ToolCall[] = [];
-
-    logger.info(`Executing pipeline ${pipeline.name}`);
-    if (pipeline) {
-      while (pipeline.toolCalls.length > 0) {
-        const task = pipeline.toolCalls.shift();
-        if (task && !pipeline.toolCalls.find(x => x.id === task.id)) {
-          try {
-            const result = await this.executeToolCall(pipeline, task);
-            results.push(result);
-            this.orchestrator.sendUpdateToPanel(`Called: ${task.function.name} with arguments ${JSON.stringify(task.function.arguments)}. \n\n The result was ${result}`);
-            this.updateState(pipeline, task.function.name, result);
-            this.handleExecutionResult(result);
-          } catch (error) {
-            this.handleExecutionError(task, error);
-          } finally {
-            processedToolCalls.push(task);
+    try {
+      logger.info(`Executing pipeline ${pipeline.name}`);
+      if (pipeline) {
+        while (pipeline.toolCalls.length > 0) {
+          const task = pipeline.toolCalls.shift();
+          if (task && !pipeline.toolCalls.find(x => x.id === task.id)) {
+            try {
+              const result = await this.executeToolCall(pipeline, task);
+              results.push(result);
+              this.orchestrator.sendUpdateToPanel(`Called: ${task.function.name} with arguments ${JSON.stringify(task.function.arguments)}. \n\n The result was ${JSON.stringify(result)}`);
+              this.updateState(pipeline, task.function.name, result);
+              this.handleExecutionResult(result);
+            } catch (error) {
+              this.handleExecutionError(task, error);
+            } finally {
+              processedToolCalls.push(task);
+            }
           }
         }
+
       }
+    } catch (error) {
+      this.handlePipelineError(pipeline, error);
     }
 
+    this.removePipeline(pipeline);
     logger.info(`Pipeline ${pipeline.name} execution completed`);
     this.displayPipeline();
     return results;
@@ -126,7 +147,9 @@ export class PipelineHandler {
   async executeAdhocToolCall(toolName: string, args: { [key: string]: any }): Promise<any> {
     const toolCall = this.generateToolCall(toolName, args);
     const pipeline = this.createPipeline([toolCall]);
-    return await this.executeToolCall(pipeline, toolCall);
+    const result = await this.executeToolCall(pipeline, toolCall);
+    this.removePipeline(pipeline);
+    return result;
   }
 
   // Pipeline Generation
@@ -136,18 +159,18 @@ export class PipelineHandler {
 
     while (retryCount < maxRetries) {
       try {
-        const pipelineJson = JSON.parse(pipelinePrompt);
+        const pipelineJsonParse = await this.messageTools.multiAttemptJsonParse(pipelinePrompt); // await this.messageTools.tryParseJson(pipelinePrompt);
 
-        if(pipelineJson.attempts) {
-          pipelineJson.attempts = retryCount;
+        if (pipelineJsonParse && pipelineJsonParse.attempts) {
+          pipelineJsonParse.attempts = retryCount;
         }
 
-        const pipelinePartMessage: Message = this.createGenerateMessage(JSON.stringify(pipelineJson));
+        const pipelinePartMessage: Message = this.createGenerateMessage(JSON.stringify(pipelineJsonParse));
         logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
         const pipelineResponse = await this.orchestrator.handleMessage(pipelinePartMessage);
 
-        const { success, json } = await this.tryParseJson(pipelineResponse.content);
-        if (success) {
+        const json = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
+        if (json) {
           logger.info('Successfully generated pipeline part');
           return json;
         }
@@ -172,6 +195,10 @@ export class PipelineHandler {
     return obj && typeof obj === 'object' && typeof obj.name === 'string' && typeof obj.directoryName === 'string' && Array.isArray(obj.toolCalls);
   }
 
+  private removePipeline(pipeline: Pipeline) {
+    this.pipelines = Array.from(this.pipelines).filter(item => item !== pipeline);
+  }
+
   private generateToolCall(toolName: string, args: { [key: string]: any }): ToolCall {
     return {
       id: uuid.v4(),
@@ -184,9 +211,14 @@ export class PipelineHandler {
   }
 
   private async executeToolCall(pipeline: Pipeline, toolCall: ToolCall): Promise<any> {
-    const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeline, JSON.stringify(toolCall.function.arguments)) : "";
-    logger.info(`Executing tool call: ${toolCall.function.name}`);
-    return await executeTool(toolCall.function.name, JSON.parse(args), pipeline.state, this.orchestrator, this);
+    try {
+      const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeline, JSON.stringify(toolCall.function.arguments)) : "";
+      logger.info(`Executing tool call: ${toolCall.function.name}`);
+      return await executeTool(toolCall.function.name, JSON.parse(args), pipeline.state, this.orchestrator, this);
+    } catch (error) {
+      logger.error(`Error occurred while executing tool call: ${this.getErrorMessage(error)}`);
+      throw error;
+    }
   }
 
   private updateArgumentsFromState(pipeline: Pipeline, args: string): string {
@@ -225,6 +257,11 @@ export class PipelineHandler {
     }
   }
 
+  private handlePipelineError(pipeline: Pipeline, error: unknown) {
+    logger.error(`Error executing tool call "${pipeline.name}": ${this.getErrorMessage(error)}`);
+    this.orchestrator.sendUpdateToPanel(`Error executing tool call "${pipeline.name}": \n\n ${error}`);
+  }
+
   private handleExecutionError(task: ToolCall, error: unknown): void {
     logger.error(`Error executing tool call "${task.function.name}": ${this.getErrorMessage(error)}`);
     this.orchestrator.sendUpdateToPanel(`Error executing tool call "${task.function.name}": \n\n ${error}`);
@@ -254,64 +291,6 @@ export class PipelineHandler {
     };
   }
 
-  private async tryParseJson(response: string): Promise<{ success: boolean; json?: any }> {
-    let trimmedResponse = response.trim().replace(/^[^{\[]+|[^}\]]+$/g, '');
-    const jsonRegex = /(\{[\s\S]*?\}|\[[\s\S]*?\])/g;
-    const matches = trimmedResponse.match(jsonRegex);
-    if (matches) {
-      trimmedResponse = matches.join('');
-      //trimmedResponse = matches.reduce((a, b) => a.length > b.length ? a : b);
-    }
-    trimmedResponse = this.balanceBracketsAndBraces(trimmedResponse);
-    trimmedResponse = this.fixEncodingIssues(trimmedResponse);
-
-    try {
-      const json = JSON.parse(trimmedResponse);
-      logger.info('Successfully parsed JSON response');
-      return { success: true, json };
-    } catch (error) {
-      logger.error(`Error parsing JSON: ${this.getErrorMessage(error)}`);
-      this.orchestrator.sendErrorToPanel(`Error creating pipeline: ${this.getErrorMessage(error)}`);
-      return { success: false };
-    }
-  }
-
-  private balanceBracketsAndBraces(str: string): string {
-    const stack: string[] = [];
-    const open: Record<string, string> = {'{': '}', '[': ']'};
-    const close: Record<string, string> = {'}': '{', ']': '['};
-    let balanced = str;
-
-    for (const char of str) {
-      if (char in open) {
-        stack.push(char);
-      } else if (char in close) {
-        if (stack.length === 0 || stack[stack.length - 1] !== close[char]) {
-          stack.push(close[char]);
-          balanced = close[char] + balanced;
-        } else {
-          stack.pop();
-        }
-      }
-    }
-
-    while (stack.length > 0) {
-      const char = stack.pop()!;
-      balanced += open[char];
-    }
-  
-    return balanced;
-  }
-
-  private fixEncodingIssues(str: string): string {
-    return str
-      .replace(/[\u2018\u2019]/g, "'")
-      .replace(/[\u201C\u201D]/g, '"')
-      .replace(/\u2026/g, '...')
-      .replace(/\u2013/g, '-')
-      .replace(/\u2014/g, '--')
-      .replace(/\u00A0/g, ' ');
-  }
 
   private getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -333,20 +312,21 @@ export class PipelineHandler {
       ])
     );
 
-    const maxWidths = headers.map((header, index) => 
+    const maxWidths = headers.map((header, index) =>
       Math.max(header.length, ...rows.map(row => String(row[index]).length))
     );
 
     const headerRow = headers.map((header, index) => header.padEnd(maxWidths[index])).join(" | ");
     const separatorRow = maxWidths.map(width => "-".repeat(width)).join("-+-");
 
-    const output: string[] =  [`| ${headerRow} |`, `| ${separatorRow} |`];
-    rows.map(row => 
+    const output: string[] = [`| ${headerRow} |`, `| ${separatorRow} |`];
+    rows.map(row =>
       output.push(`| ${row.map((cell, index) => String(cell).padEnd(maxWidths[index])).join(" | ")} |`
-    ));
+      ));
 
     output.forEach(line => this.orchestrator.sendUpdateToPanel(line));
   }
 
   private lastErrorMessage: string = '';
 }
+

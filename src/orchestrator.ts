@@ -36,7 +36,8 @@ export class Orchestrator {
         logger.info(`Handling message: ${message.command}`);
         switch (message.command as MessageType) {
             case MessageType.SendMessage: {
-                const response = await this.executeLlmChatRequest(message.content, message.tool_calls && message.tool_calls.length > 0);
+                const tool_use = message.tool_calls && message.tool_calls.length > 0 || this.pipelineHandler.getToolCallsLength() == 0;
+                const response = await this.executeLlmChatRequest(message.content, tool_use);
                 if(response && response.tool_calls){
                     const pipeline = this.createPipeline(response.tool_calls);
                     logger.info('Pipeline created in orchestrator sendMessage');
@@ -83,8 +84,7 @@ export class Orchestrator {
             
             const request: ChatRequest = { model: modelName, messages: this.messages, stream: false };
 
-            if (tool_use || // explicit tool call 
-                this.pipelineHandler.getPipelinesLength() == 0) { // first call and so necessarily a tool call
+            if (tool_use ) { 
                 request.tools = ollamaTools;
                 request.messages = [systemMessage, newMessage];
             }
@@ -132,6 +132,10 @@ export class Orchestrator {
             this.sendErrorToPanel('Error communicating with LLM: ' + JSON.stringify(error));
         }
         return { role: MessageRole.Assistant, content: 'An unexpected error occurred' };
+    }
+
+    private async simulateToolCall(prompt: string): Promise<Message> {
+        throw new Error("test");
     }
 
     public async executePipeline(pipeline: Pipeline): Promise<Message> {
