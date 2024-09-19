@@ -144,11 +144,11 @@ export class OllamaClient implements LlmClient {
     async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
         const toolSelectionPrompt = `
         {
-          "instructions": "Act as a JSON formatter. Analyze the user_request. Choose one tool that will complete the request from the available tools and provide their parameters. If the request is just a query for information, respond normally. If the taks is complex user the 'planner' and only the 'planner'",
+          "instructions": "Act as a JSON formatter. Analyze the user_request. Choose one tool that will complete the request from the available tools and provide their parameters. If the request is just a query for information, respond normally. If the task is complex use the 'planner' and only the 'planner'",
           "output_format": {
             "type": "json",
             "structure": {
-              "toolCalls": [
+              "toolCalls": [ 
                 {
                 "id": "string", 
                 "type": "function", 
@@ -164,9 +164,10 @@ export class OllamaClient implements LlmClient {
             }
           },
           "constraints": [
-            "Each tool must have a single, atomic function",
+            "The tool must be a single, atomic function",
             "Only use tools that are directly relevant to the request",
-            "Prefer the planning tool unless a direct request like web
+            "Prefer the planning tool for complex tasks.",
+            "Prefer single tool calls to handle basic requests like chat, search, weather, etc."
           ],
             "system_info": {
                 "os": "${os.platform()}",
@@ -179,15 +180,24 @@ export class OllamaClient implements LlmClient {
 
         try {
             prompt = this.prepareStringForLLM(prompt);
-            const request: GenerateRequest = { model: this.model, 
+            const request: GenerateRequest = { 
+                model: this.model, 
                 prompt: toolSelectionPrompt, 
                 system: systemMessage.content, 
                 stream: false, 
-                format: "json" };
+                format: "json" 
+            };
             const response = await this.generate(request);
             
-            if(response) {
+            if (response) {
                 const toolCalls = await this.messageTools.multiAttemptJsonParse(JSON.stringify(response.response));
+
+                let transformedToolCalls = this.transformToToolCalls(toolCalls.json);
+
+                // Check if there's more than one tool call and if 'planner' exists
+                if (transformedToolCalls.length > 1 && transformedToolCalls.some(call => call.function.name === 'planner')) {
+                    transformedToolCalls = transformedToolCalls.filter(call => call.function.name === 'planner');
+                }
 
                 const chatResponse: ChatResponse = {
                     model: response.model,
@@ -195,9 +205,8 @@ export class OllamaClient implements LlmClient {
                     message: { 
                         role: 'assistant', 
                         content: response.response, 
-                        tool_calls: response.response ? 
-                        this.transformToToolCalls(toolCalls.json)
-                        : undefined},
+                        tool_calls: transformedToolCalls
+                    },
                     done: true,
                     done_reason: response.done_reason,
                     total_duration: 0,

@@ -315,12 +315,12 @@ export class PlanDirectoryStructure implements Executable {
                 "objectives": "${state.get('objectives') || 'no objectives'}",
                 "system_info": {
                   "os": "${os.platform()}",
-                  "home_directory": "${os.homedir()}",
-                  available_tools: ${JSON.stringify(ollamaTools)}
+                  "home_directory": "${os.homedir()}"
                 },
                 "output_format": {
                   "type": "json",
                   "structure": {
+                  "project_directory_name": "${state.get('projectDirectory') || ""}"
                     file_list: [
                       "project_directory_name",
                       "project_directory_name/file1.ext",
@@ -366,26 +366,27 @@ export class CreateTasks implements Executable {
             if(objectives || args.task) {
                 const objectivesJson = JSON.parse(objectives || JSON.stringify([{ objective: args.task }]));
 
-                for(const objective in objectivesJson){
+                for(const objective in objectivesJson.parameters.request){
                     const pipelinePrompt = `
                     {
                     "instructions": "Analyze the USER_REQUEST and OBJECTIVE to create an array of tasks that will be executed and validated in order so that the objective is met. Double check results for accuracy, order of execution, and achievement of the objective",
                     "output_format": {
                         "type": "json",
-                        "structure": {
+                        "schema": {
                             "tasks": [
                                 {
-                                    "task": "Description of the task",
-                                    "objective_name": "Name of the related objective",
+                                    "task": "string", // Description of the task
+                                    "objective_name": "string", // Name of the related objective
                                     "function": {
-                                        "name": "Name of the function to execute",
-                                        "working_directory": "Directory for function execution",
+                                        "name": "string", // Name of the function to execute
+                                        "working_directory": "string", // Directory for function execution
                                         "arguments": {}
                                 },
                                 {
-                                    "validation": {
-                                        "name": "Name of the validation function",
-                                        "working_directory": "Directory for validation execution",
+                                    "task": "string", // Description of validating task
+                                    "function": {
+                                        "name": "string", // Name of the validation function
+                                        "working_directory": "string",  //Directory for validation execution
                                         "arguments": {}
                                 },
                             ]
@@ -443,40 +444,36 @@ export class CreatePlanPipeline implements Executable {
         try {
             logger.info('Creating pipeline');
             this.orchestrator.sendUpdateToPanel(`Creating pipeline`);
-            const pipelinePrompt = `{
-                "instructions": [
-                  "Analyze the USER_REQUEST and create a project overview.",
-                  "In a future step, you will break down the USER_REQUEST into OBJECTIVES with TASKS, FUNCTIONS, and ARGS.",
-                  "For now, only focus on the following:"
-                ],
-                "tasks": [
-                  "Ideate on ways to excel at achieving this task.",
-                  "Write a brief (200 words or less) outlining the overarching methodology to solve the request.",
-                  "Provide a name for the project",
-                  "Provide a project directory name"
-                ],
-                "system_info": {
-                  "os": "${os.platform()}",
-                  "home_directory": "${os.homedir()}",
-                  "available_tools": ${JSON.stringify(ollamaTools)}
-                },
-                "user_request": "${args.task}",
-                "output_format": {
-                  "type": "json",
-                  "structure": {
-                    "name": "User Request Name",
-                    "directoryName": "project_directory_name",
-                    "brief": "A user-friendly description of the plan"
-                  }
-                },
-                "constraints": [
-                  "Output must be formatted for machine reading",
-                  "Provide only JSON output, no explanations or comments",
-                  "Return a complete, minified JSON object using the output_format as a template",
-                  "Double check the output for accuracy"
-                ],
-                "attempts": 0
-              }`;
+            const pipelinePrompt = `
+                {
+                    "instructions": [
+                        "Analyze the provided 'user_request'.",
+                        "Execute the tasks listed in the 'tasks' array."
+                    ],
+                    "tasks": [
+                        "Devise strategies to fulfill the 'user_request'.",
+                        "Create a 'brief' (maximum 200 words) outlining how the 'user_request' will be fulfilled.",
+                        "Create an appropriate project 'name'.",
+                        "Create an appropriate project 'directoryName'.",
+                        "Return the results using the JSON schema in 'output_format'."
+                    ],
+                    "user_request": "${args.task}",
+                    "output_requirements": [
+                        "Format the output for machine readability.",
+                        "Provide the response as a complete, minified JSON object.",
+                        "Strictly adhere to the output_format schema specified below.",
+                        "Ensure the output contains no explanations, comments, or extraneous text.",
+                        "Thoroughly verify the output for accuracy and schema compliance."
+                    ],
+                    "output_format": {
+                        "type": "json",
+                        "schema": {
+                        "name": "string", // Concise descriptive project name based on the USER_REQUEST"
+                        "directoryName": "string", // Valid directory name for the project, using underscores for spaces"
+                        "brief": "string", // Concise description (≤200 words) of the project plan and methodology"
+                        }
+                    }
+                }`;
 
             // const maxRetries = 3;
             // let retryCount = 0;
@@ -485,8 +482,14 @@ export class CreatePlanPipeline implements Executable {
             this.orchestrator.sendUpdateToPanel("Executing pre-planning.");
 
             const preplan = await this.pipelineHandler.generatePipelinePart(pipelinePrompt);
+            if(preplan && preplan.brief && preplan.name & preplan.projectDirectory) {
+                logger.info("VALID PREPLAN");
+            } else {
+                logger.info("BORKED PREPLAN");
+            }
             state.set('preplan', JSON.stringify(preplan));
-            this.orchestrator.sendUpdateToPanel(`Preplan generated: Brief: ${preplan.brief} \n User Request Name: ${preplan.UserRequestName} \n Project Directory Name: ${preplan.ProjectDirectoryName}`);
+            state.set('projectDirectory', preplan.projectDirectory)
+            this.orchestrator.sendUpdateToPanel(`Preplan generated: Brief: ${preplan.brief} \n User Request Name: ${preplan.name} \n Project Directory Name: ${preplan.directoryName}`);
 
             this.orchestrator.sendUpdateToPanel("Planning file system.");
             const filesMessage: Message = {role: 'system', content: args.task};
@@ -497,7 +500,7 @@ export class CreatePlanPipeline implements Executable {
             const objectives = await executeTool('create_objectives', objectivesMessage, state, this.orchestrator, this.pipelineHandler);
 
             this.orchestrator.sendUpdateToPanel("Creating tasks.");
-            const taskMessage: Message = {role: 'system', content: args.task, context: objectives.context};
+            const taskMessage: Message = {role: 'system', content: args.task};
             const tasks = await executeTool('create_tasks', taskMessage, state, this.orchestrator, this.pipelineHandler);
 
             const parsedTasks = await this.messageTools.multiAttemptJsonParse(tasks);
