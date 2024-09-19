@@ -15,7 +15,6 @@ import { WebSearch } from './webSearch';
 import { OpenMeteoWeather } from './openMeteoWeather';
 import { MessageTools } from '../messages/messageTools';
 
-// ... (existing code remains unchanged)
 
 export class OpenMeteoWeatherExecutable implements Executable {
     orchestrator: Orchestrator;
@@ -35,6 +34,7 @@ export class OpenMeteoWeatherExecutable implements Executable {
             if(args.key_value_pairs) {
                 if(args.key_value_pairs.has('latitude') && args.key_value_pairs.has('longitude')) {
                     const result = await this.openMeteoWeather.execute(args.key_value_pairs.get('latitude') || '', args.key_value_pairs.get('longitude') || '');
+                    state.set('weather', result);
                     logger.info('OpenMeteoWeather executed successfully');
                     return { results: [result] };
                 }
@@ -67,6 +67,7 @@ export class WebSearchExecutable implements Executable {
             logger.info('Web search executed successfully');
             const resultStrings: string[] = [];
             results.forEach(x => resultStrings.push(x.url))
+            state.set(args.query || "", resultStrings.toString());
             return { results: resultStrings };
         } catch (error) {
             logger.error(`Error executing web search: ${getErrorMessage(error)}`);
@@ -91,6 +92,7 @@ export class ListFilesTopLevel implements Executable {
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path}`);
             const dirPath = path.join(args.path || os.homedir.toString());
             const files = await fs.readdir(dirPath, { withFileTypes: true });
+            state.set(dirPath, files.map(x => x).join("\n"));
             logger.info(`Successfully listed ${files.length} files`);
             return { files: files.map(file => file.name) };
         } catch (error) {
@@ -116,6 +118,7 @@ export class ListFilesRecursive implements Executable {
             this.orchestrator.sendUpdateToPanel(`Listing files in: ${args.path} (recursive)`);
             const dirPath = path.join(args.path || os.homedir.toString());
             const files = await this.recursiveReadDir(dirPath);
+            state.set(dirPath, files.map(x => x).join("\n"));
             logger.info(`Successfully listed ${files.length} files recursively`);
             return { files };
         } catch (error) {
@@ -174,6 +177,7 @@ export class ReadFile implements Executable {
             this.orchestrator.sendUpdateToPanel(`Reading file: ${args.path}`);
             const filePath = path.join(args.path || os.homedir.toString());
             const content = await fs.readFile(filePath, 'utf-8');
+            state.set(filePath, content);
             logger.info(`File ${args.path} read successfully`);
             return { results: [content] };
         } catch (error) {
@@ -198,6 +202,7 @@ export class WriteToFile implements Executable {
             logger.info(`Writing file: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Writing file: ${args.path}`);
             const filePath = path.join(args.path || os.homedir.toString());
+            state.set(filePath, args.message.content);
             await fs.writeFile(filePath, args.message.content, 'utf-8');
             logger.info(`File ${filePath} written successfully`);
             return { results: [`File ${filePath} written successfully`] };
@@ -224,7 +229,7 @@ export class AttemptCompletion implements Executable {
             vscode.window.showInformationMessage(args.task || "");
             if (args.command) {
                 logger.info(`Executing command: ${args.command}`);
-                this.orchestrator.sendUpdateToPanel(`Attempted completion`);
+                this.orchestrator.sendUpdateToPanel(`Attempted completion for state: ${JSON.stringify(state.entries())}`);
                 // Execute the command if provided
                 // Implement command execution logic here
             }
@@ -451,21 +456,21 @@ export class CreatePlanPipeline implements Executable {
                         "Execute the tasks listed in the 'tasks' array."
                     ],
                     "tasks": [
-                        "Devise strategies to fulfill the 'user_request'.",
+                        "Devise a strategy to fulfill the 'user_request'.",
                         "Create a 'brief' (maximum 200 words) outlining how the 'user_request' will be fulfilled.",
                         "Create an appropriate project 'name'.",
                         "Create an appropriate project 'directoryName'.",
-                        "Return the results using the JSON schema in 'output_format'."
+                        "Return the results using the JSON schema in 'output_schema'."
                     ],
                     "user_request": "${args.task}",
                     "output_requirements": [
                         "Format the output for machine readability.",
                         "Provide the response as a complete, minified JSON object.",
-                        "Strictly adhere to the output_format schema specified below.",
+                        "Strictly adhere to the output_schema schema specified below.",
                         "Ensure the output contains no explanations, comments, or extraneous text.",
                         "Thoroughly verify the output for accuracy and schema compliance."
                     ],
-                    "output_format": {
+                    "output_schema": {
                         "type": "json",
                         "schema": {
                         "name": "string", // Concise descriptive project name based on the USER_REQUEST"
@@ -492,15 +497,15 @@ export class CreatePlanPipeline implements Executable {
             this.orchestrator.sendUpdateToPanel(`Preplan generated: Brief: ${preplan.brief} \n User Request Name: ${preplan.name} \n Project Directory Name: ${preplan.directoryName}`);
 
             this.orchestrator.sendUpdateToPanel("Planning file system.");
-            const filesMessage: Message = {role: 'system', content: args.task};
+            const filesMessage: Message = { role: 'system', content: args.task };
             const files = await executeTool('plan_directory_structure', filesMessage, state, this.orchestrator, this.pipelineHandler);
-            
+
             this.orchestrator.sendUpdateToPanel("Setting objectives.");
-            const objectivesMessage: Message = {role: 'system', content: args.task};
+            const objectivesMessage: Message = { role: 'system', content: args.task };
             const objectives = await executeTool('create_objectives', objectivesMessage, state, this.orchestrator, this.pipelineHandler);
 
             this.orchestrator.sendUpdateToPanel("Creating tasks.");
-            const taskMessage: Message = {role: 'system', content: args.task};
+            const taskMessage: Message = { role: 'system', content: args.task };
             const tasks = await executeTool('create_tasks', taskMessage, state, this.orchestrator, this.pipelineHandler);
 
             const parsedTasks = await this.messageTools.multiAttemptJsonParse(tasks);
@@ -511,7 +516,7 @@ export class CreatePlanPipeline implements Executable {
             if (pipeline) {
                 this.orchestrator.sendUpdateToPanel("Pipeline created successfully.");
                 logger.info('Pipeline created successfully');
-                return { pipeline: pipeline }; 
+                return { pipeline: pipeline };
             } else {
                 logger.error('Failed to parse plan');
                 throw new Error('Failed to parse plan');
@@ -557,9 +562,10 @@ export class Chat implements Executable {
         try {
             logger.info(`Executing chat with message: ${args.message}`);
             args.message.command = 'sendMessage';
-            const response = await this.orchestrator.handleMessage( args.message );
+            const response = await this.orchestrator.handleMessage(args.message);
+            state.set('chat', JSON.stringify(response.content));
             logger.info('Chat executed successfully');
-            return {message: response};
+            return { message: response };
         } catch (error) {
             logger.error(`Error calling ollama.chat: ${getErrorMessage(error)}`);
             this.orchestrator.sendErrorToPanel(`Error calling ollama.chat: ${getErrorMessage(error)}`);
@@ -582,7 +588,7 @@ export class EnsureProjectFolder implements Executable {
             logger.info(`Checking project folder: ${args.path}`);
             this.orchestrator.sendUpdateToPanel(`Checking project folder: ${args.path}`);
             const projectPath = path.join(args.path || os.homedir.toString());
-            
+
             try {
                 await fs.access(projectPath);
                 logger.info(`Project folder ${args.path} already exists`);
@@ -619,10 +625,10 @@ export const createTools = (orchestrator: Orchestrator, pipelineHandler: Pipelin
     open_meteo_weather: new OpenMeteoWeatherExecutable(orchestrator, pipelineHandler),
 });
 
-export async function executeTool(name: string, 
-    args: Message, 
-    state: any, 
-    orchestrator: Orchestrator, 
+export async function executeTool(name: string,
+    args: Message,
+    state: any,
+    orchestrator: Orchestrator,
     pipelineHandler: PipelineHandler): Promise<any> {
     logger.info(`Executing tool: ${name}`);
     // Trim the name of special characters
@@ -654,7 +660,7 @@ export async function executeTool(name: string,
         }
     } else {
         logger.warn(`No handler found for tool ${name}, falling back to chat`);
-        const executableArgs: ExecutableArgs = { message: {role: 'user', content: trimmedArgs}};
+        const executableArgs: ExecutableArgs = { message: { role: 'user', content: trimmedArgs } };
         return await toolHandlers['chat'].execute(executableArgs, state);
     }
 }

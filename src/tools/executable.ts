@@ -14,6 +14,7 @@ export interface ExecutableArgs {
 }
 
 export interface ExecutableReturn {
+    // consolidate on Message. files and results are the same array of string
     files?: string[];
     results?: string[];
     pipeline?: Pipeline;
