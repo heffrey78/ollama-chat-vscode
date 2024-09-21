@@ -3,7 +3,9 @@ import * as child_process from 'child_process';
 import { promisify } from 'util';
 import vscode from 'vscode';
 import { Orchestrator } from '../orchestrator';
-import { Executable, ExecutableArgs, ExecutableReturn } from './executable';
+import { Executable } from './executable';
+import { ExecutableReturn } from "./ExecutableReturn";
+import { ExecutableArgs } from "./ExecutableArgs";
 import { State, PipelineHandler } from '../pipelineHandler';
 
 export class ExecuteCommand implements Executable {
@@ -18,7 +20,7 @@ export class ExecuteCommand implements Executable {
 
     async execute(args: ExecutableArgs, state: State): Promise<ExecutableReturn> {
         const permissionQuestion = `Do you want to execute the following command on ${os.platform()}?\n${args.command}\n\nReply with 'YES' to proceed.`;
-        let permissionResult: any = {};
+        let permissionResult: string = '';
         if(!args.command) {
             throw new Error(`Executable command missing`);
         }
@@ -28,7 +30,7 @@ export class ExecuteCommand implements Executable {
             prompt: permissionQuestion,
             placeHolder: 'Type your answer here',
             ignoreFocusOut: true
-        });
+        }) || 'NO';
 
         this.orchestrator.sendUpdateToPanel(`Permission question: ${permissionQuestion}, User answer: ${permissionResult}`);
 
@@ -45,6 +47,9 @@ export class ExecuteCommand implements Executable {
                 if (stderr) {
                     this.orchestrator.sendUpdateToPanel(`Command error: ${stderr}`);
                 }
+
+                state.set(`${args.command}-stdout`, stdout);
+                state.set(`${args.command}-stderr`, stderr);
 
                 return { results: [stdout], error: stderr };
 

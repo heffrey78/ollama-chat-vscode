@@ -7,7 +7,7 @@ import { Message } from "./messages/message";
 import { MessageType } from "./messages/messageType";
 import { ToolCall } from "./pipelines/toolCall";
 import { MessageTools } from "./messages/messageTools";
-import { pipeline } from "stream";
+import { ExecutableReturn } from "./tools/ExecutableReturn";
 
 export interface Objective {
   objective: string;
@@ -144,7 +144,7 @@ export class PipelineHandler {
     return results;
   }
 
-  async executeAdhocToolCall(toolName: string, args: { [key: string]: any }): Promise<any> {
+  async executeAdhocToolCall(toolName: string, args: { [key: string]: any }): Promise<ExecutableReturn> {
     const toolCall = this.generateToolCall(toolName, args);
     const pipeline = this.createPipeline([toolCall]);
     const result = await this.executeToolCall(pipeline, toolCall);
@@ -153,7 +153,7 @@ export class PipelineHandler {
   }
 
   // Pipeline Generation
-  async generatePipelinePart(pipelinePrompt: string): Promise<any> {
+  async generatePipelinePart(pipelinePrompt: string): Promise<ExecutableReturn> {
     const maxRetries = 3;
     let retryCount = 0;
 
@@ -165,14 +165,16 @@ export class PipelineHandler {
           pipelineJsonParse.attempts = retryCount;
         }
 
+        // Always calling generate instead of chat...SHOULD we make a decision since we have a fallback to generate now?
         const pipelinePartMessage: Message = this.createGenerateMessage(JSON.stringify(pipelineJsonParse));
+          
         logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
         const pipelineResponse = await this.orchestrator.handleMessage(pipelinePartMessage);
 
-        const json = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
-        if (json) {
+        const pipelinePartJson = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
+        if (pipelinePartJson) {
           logger.info('Successfully generated pipeline part');
-          return json;
+          return { message: { role: 'system', content: JSON.stringify(pipelinePartJson) } };
         }
       } catch (error) {
         this.handleGenerationError(error, retryCount, maxRetries);
@@ -210,7 +212,7 @@ export class PipelineHandler {
     };
   }
 
-  private async executeToolCall(pipeline: Pipeline, toolCall: ToolCall): Promise<any> {
+  private async executeToolCall(pipeline: Pipeline, toolCall: ToolCall): Promise<ExecutableReturn> {
     try {
       const args = toolCall.function.arguments ? this.updateArgumentsFromState(pipeline, JSON.stringify(toolCall.function.arguments)) : "";
       logger.info(`Executing tool call: ${toolCall.function.name}`);
@@ -243,7 +245,7 @@ export class PipelineHandler {
     logger.info(`Updated state for pipeline ${pipeline.name}, tool: ${toolName}`);
   }
 
-  private handleExecutionResult(result: any): void {
+  private handleExecutionResult(result: ExecutableReturn): void {
     if (this.isPipeline(result)) {
       const newPipeline: Pipeline = result;
       newPipeline.state.set('pipelineName', result.name);

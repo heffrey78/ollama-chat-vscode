@@ -152,13 +152,14 @@ class PipelineHandler {
                 if (pipelineJsonParse && pipelineJsonParse.attempts) {
                     pipelineJsonParse.attempts = retryCount;
                 }
+                // Always calling generate instead of chat...SHOULD we make a decision since we have a fallback to generate now?
                 const pipelinePartMessage = this.createGenerateMessage(JSON.stringify(pipelineJsonParse));
                 logger_1.logger.info(`Generating pipeline part, attempt ${retryCount + 1}`);
                 const pipelineResponse = await this.orchestrator.handleMessage(pipelinePartMessage);
-                const json = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
-                if (json) {
+                const pipelinePartJson = await this.messageTools.multiAttemptJsonParse(pipelineResponse.content); // await this.messageTools.tryParseJson(pipelineResponse.content);
+                if (pipelinePartJson) {
                     logger_1.logger.info('Successfully generated pipeline part');
-                    return json;
+                    return { message: { role: 'system', content: JSON.stringify(pipelinePartJson) } };
                 }
             }
             catch (error) {

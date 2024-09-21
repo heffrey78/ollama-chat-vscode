@@ -144,7 +144,17 @@ export class OllamaClient implements LlmClient {
     async simulateToolCall(prompt: string): Promise<ChatResponse | undefined> {
         const toolSelectionPrompt = `
         {
-          "instructions": "Act as a JSON formatter. Analyze the user_request. Choose one tool that will complete the request from the available tools and provide their parameters. If the request is just a query for information, respond normally. If the task is complex use the 'planner' and only the 'planner'",
+          "instructions": [
+          "Act as a JSON formatter",
+          "Use output_format as a schema", 
+          "Adhere to all constraints", 
+          "Utilize system_info", 
+          "Analyze the user_request", 
+          "From available_tools, choose one tool that will fulfill the user_request",
+          "Provide parameters appropriate to the tool, system, and request",
+          "If the user_request a query for information or does not require a tool, respond normally",
+          "If the user_request is complex use the 'planner' tool and only the 'planner' tool"
+            ],
           "output_format": {
             "type": "json",
             "structure": {
@@ -167,7 +177,6 @@ export class OllamaClient implements LlmClient {
             "The tool must be a single, atomic function",
             "Only use tools that are directly relevant to the request",
             "Prefer the planning tool for complex tasks.",
-            "Prefer single tool calls to handle basic requests like chat, search, weather, etc."
           ],
             "system_info": {
                 "os": "${os.platform()}",
@@ -343,19 +352,16 @@ export class OllamaClient implements LlmClient {
         try {
             if (!toolCalls) return [];
 
-            if(toolCalls[0]){
-                console.log(`${toolCalls[0].function.name}, ${toolCalls[0].function.arguments}`)
-            }
-            return toolCalls.map(toolCall => ({
+            return [{
                 id: `call_${Math.random().toString(36).substr(2, 9)}`,
-                type: "function", // Explicitly set to "function"
+                type: 'function', 
                 function: {
-                    name: toolCall.function.name,
-                    arguments: typeof toolCall.function.arguments === 'string'
-                        ? this.parseArguments(toolCall.function.arguments)
-                        : toolCall.function.arguments
+                    name: toolCalls[0].function.name,
+                    arguments: typeof toolCalls[0].function.arguments === 'string'
+                        ? this.parseArguments(toolCalls[0].function.arguments)
+                        : toolCalls[0].function.arguments
                 }
-            }));
+            }];
         } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 console.log(`Error transforming tool calls: ${errorMessage}`);

@@ -8,7 +8,9 @@ import { ClaudeClient } from './llmClients/claudeClient';
 import { DynamicLlmClient } from './llmClients/dynamicClient';
 import { OllamaClient } from './llmClients/ollamaClient';
 import { OllamaCliClient } from './llmClients/ollamaCliClient';
-import { Executable, ExecutableArgs, ExecutableReturn } from './tools/executable';
+import { Executable } from './tools/executable';
+import { ExecutableReturn } from "./tools/ExecutableReturn";
+import { ExecutableArgs } from "./tools/ExecutableArgs";
 import { Orchestrator } from './orchestrator';
 import { PipelineHandler, State } from './pipelineHandler';
 
